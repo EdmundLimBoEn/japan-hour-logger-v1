@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Japan Hour Logger</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="led" id="led"></div>
+      <div>
+        <h1>JAPAN HOUR LOGGER</h1>
+        <p class="sub">{{ receiver.name }} · {{ receiver.id }} · locator {{ receiver.locator }}</p>
+      </div>
+    </div>
+    <div class="clocks">
+      <div><span class="k">UTC</span> <span id="clock-utc">--</span></div>
+      <div><span class="k">SGT</span> <span id="clock-sgt">--</span></div>
+    </div>
+  </header>
+
+  <section class="instruments">
+    <article class="panel">
+      <h2>Receiver</h2>
+      <dl>
+        <div><dt>Online</dt><dd id="f-online">--</dd></div>
+        <div><dt>UDP</dt><dd id="f-udp">--</dd></div>
+        <div><dt>Band</dt><dd id="f-band">--</dd></div>
+        <div><dt>Dial</dt><dd id="f-dial">--</dd></div>
+        <div><dt>Last decode</dt><dd id="f-age">--</dd></div>
+        <div><dt>Uptime</dt><dd id="f-uptime">--</dd></div>
+      </dl>
+    </article>
+    <article class="panel">
+      <h2>Today (SGT)</h2>
+      <dl>
+        <div><dt>Decodes</dt><dd id="f-today">--</dd></div>
+        <div><dt>Japan</dt><dd id="f-today-ja">--</dd></div>
+        <div><dt>15 min</dt><dd id="f-15">--</dd></div>
+        <div><dt>DB</dt><dd id="f-db">--</dd></div>
+      </dl>
+    </article>
+    <article class="panel japan">
+      <h2>Japan panel</h2>
+      <dl>
+        <div><dt>Stations</dt><dd id="j-stations">--</dd></div>
+        <div><dt>Median SNR</dt><dd id="j-snr">--</dd></div>
+        <div><dt>Rel SNR</dt><dd id="j-rel">--</dd></div>
+        <div><dt>Median dist</dt><dd id="j-dist">--</dd></div>
+        <div><dt>Share</dt><dd id="j-share">--</dd></div>
+        <div><dt>Peak SGT</dt><dd id="j-peak">--</dd></div>
+      </dl>
+      <p class="hint">japan_relative_snr = median Japan SNR − median non-Japan SNR</p>
+    </article>
+  </section>
+
+  <section class="charts">
+    <article class="panel wide"><h2>Activity (SGT buckets)</h2><canvas id="c-activity"></canvas></article>
+    <article class="panel wide"><h2>Unique stations</h2><canvas id="c-unique"></canvas></article>
+    <article class="panel wide"><h2>Japan share / decodes</h2><canvas id="c-share"></canvas></article>
+    <article class="panel wide"><h2>SNR medians</h2><canvas id="c-snr"></canvas></article>
+    <article class="panel"><h2>Distance</h2><canvas id="c-dist"></canvas></article>
+    <article class="panel"><h2>Countries</h2><canvas id="c-countries"></canvas></article>
+  </section>
+
+  <section class="panel">
+    <h2>Latest decodes</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>SGT</th><th>UTC</th><th>SNR</th><th>DF</th><th>Call</th><th>Grid</th><th>Country</th><th>km</th><th>Message</th>
+        </tr>
+      </thead>
+      <tbody id="latest"></tbody>
+    </table>
+  </section>
+
+  <script>
+    window.LOGGER_META = {
+      receiverLocator: "{{ receiver.locator }}",
+      udp: "{{ udp.host }}:{{ udp.port }}",
+      version: "{{ version }}"
+    };
+  </script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

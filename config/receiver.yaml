@@ -1,0 +1,41 @@
+receiver:
+  id: school-9v
+  name: Japan Hour Receiver
+  # Maidenhead locator of the school station. Replace TODO before distance/bearing
+  # enrichment can run. Country/DXCC still work without a grid.
+  locator: TODO
+  timezone: Asia/Singapore
+
+udp:
+  host: 127.0.0.1
+  port: 2237
+  multicast: false
+
+http:
+  host: 127.0.0.1
+  port: 8080
+
+database:
+  url: sqlite:///data/radio.db
+
+paths:
+  data_dir: data
+  raw_dir: data/raw/wsjtx
+  exports_dir: data/exports
+  backups_dir: data/backups
+  jsonl_events: true
+
+dedupe:
+  # Network-duplicate window only. Same callsign heard 20 times remains 20 rows.
+  window_seconds: 2.0
+
+japan:
+  # DXCC entity names treated as Japan for Japan Hour metrics.
+  dxcc_entities:
+    - Japan
+    - Ogasawara
+    - Minami Torishima
+
+analytics:
+  default_bucket_minutes: 15
+  display_timezone: Asia/Singapore

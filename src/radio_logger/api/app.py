@@ -1,0 +1,332 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session, sessionmaker
+
+from radio_logger import __version__
+from radio_logger.analytics.japan_hour import (
+    country_mix,
+    distance_histogram,
+    japan_hour_buckets,
+    snr_histogram,
+    summary,
+    today_bounds,
+)
+from radio_logger.config import AppConfig
+from radio_logger.database.engine import database_size_bytes, db_writable
+from radio_logger.database.models import Observation
+from radio_logger.database.repository import Repository
+from radio_logger.export_csv import observations_to_csv
+from radio_logger.models import RuntimeState
+
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+
+def observation_dict(row: Observation) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "receiver_id": row.receiver_id,
+        "timestamp_utc": row.timestamp_utc.isoformat() if row.timestamp_utc else None,
+        "timestamp_local": row.timestamp_local.isoformat() if row.timestamp_local else None,
+        "dial_frequency_hz": row.dial_frequency_hz,
+        "audio_frequency_hz": row.audio_frequency_hz,
+        "signal_frequency_hz": row.signal_frequency_hz,
+        "band": row.band,
+        "mode": row.mode,
+        "snr_db": row.snr_db,
+        "dt": row.dt,
+        "df": row.df,
+        "raw_message": row.raw_message,
+        "message_type": row.message_type,
+        "is_cq": row.is_cq,
+        "tx_callsign": row.tx_callsign,
+        "rx_callsign": row.rx_callsign,
+        "tx_grid": row.tx_grid,
+        "grid_source": row.grid_source,
+        "country": row.country,
+        "dxcc": row.dxcc,
+        "continent": row.continent,
+        "cqz": row.cqz,
+        "ituz": row.ituz,
+        "distance_km": row.distance_km,
+        "bearing_deg": row.bearing_deg,
+        "low_confidence": row.low_confidence,
+        "off_air": row.off_air,
+        "source": row.source,
+        "is_japan": row.is_japan,
+    }
+
+
+def create_app(
+    config: AppConfig,
+    session_factory: sessionmaker[Session],
+    runtime: RuntimeState,
+) -> FastAPI:
+    app = FastAPI(title="Japan Hour Logger", version=__version__)
+    templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
+    static_dir = WEB_DIR / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    def db_session() -> Session:
+        return session_factory()
+
+    @app.get("/", response_class=HTMLResponse)
+    def dashboard(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "index.html",
+            {
+                "receiver": config.receiver,
+                "udp": config.udp,
+                "version": __version__,
+            },
+        )
+
+    @app.get("/api/status")
+    def api_status() -> dict[str, Any]:
+        now = datetime.now(tz=timezone.utc)
+        session = db_session()
+        try:
+            repo = Repository(session)
+            last_15 = now - timedelta(minutes=15)
+            start_today, end_today = today_bounds(now, config.analytics.display_timezone)
+            last_row = repo.latest_observations(limit=1)
+            last_obs = observation_dict(last_row[0]) if last_row else None
+            last_decode_age = None
+            if runtime.last_decode_at:
+                last_decode_age = (now - runtime.last_decode_at).total_seconds()
+            udp_age = None
+            if runtime.last_udp_at:
+                udp_age = (now - runtime.last_udp_at).total_seconds()
+            udp_recent = udp_age is not None and udp_age < 30
+            size = database_size_bytes(config.database.url)
+            status = runtime.receiver_status
+            return {
+                "ok": True,
+                "version": __version__,
+                "online": udp_recent or last_decode_age is not None,
+                "udp_bound": runtime.udp_bound,
+                "udp_recently_seen": udp_recent,
+                "udp_age_seconds": udp_age,
+                "last_heartbeat_at": runtime.last_heartbeat_at.isoformat() if runtime.last_heartbeat_at else None,
+                "last_decode_at": runtime.last_decode_at.isoformat() if runtime.last_decode_at else None,
+                "last_decode_age_seconds": last_decode_age,
+                "last_decode": last_obs,
+                "decodes_15m": repo.count_since(last_15),
+                "japan_decodes_15m": repo.count_since(last_15, japan_only=True),
+                "decodes_today": repo.count_since(start_today),
+                "japan_decodes_today": repo.count_since(start_today, japan_only=True),
+                "session_decodes": runtime.decode_count_session,
+                "duplicates_suppressed": runtime.duplicate_suppressed,
+                "db_writable": db_writable(session.get_bind()),
+                "db_size_bytes": size,
+                "uptime_seconds": (now - runtime.started_at).total_seconds(),
+                "dial_frequency_hz": status.dial_frequency_hz,
+                "band": None if status.dial_frequency_hz is None else __import__("radio_logger.bands", fromlist=["band_from_hz"]).band_from_hz(status.dial_frequency_hz),
+                "mode": status.mode,
+                "receiver": {
+                    "id": config.receiver.id,
+                    "name": config.receiver.name,
+                    "locator": config.receiver.locator,
+                    "timezone": config.receiver.timezone,
+                },
+                "last_error": runtime.last_error,
+                "display_timezone": config.analytics.display_timezone,
+                "today_start_utc": start_today.isoformat(),
+                "today_end_utc": end_today.isoformat(),
+            }
+        finally:
+            session.close()
+
+    @app.get("/api/observations")
+    def api_observations(
+        limit: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+        callsign: str | None = None,
+        country: str | None = None,
+        japan_only: bool = False,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> dict[str, Any]:
+        session = db_session()
+        try:
+            rows, total = Repository(session).list_observations(
+                limit=limit,
+                offset=offset,
+                callsign=callsign,
+                country=country,
+                japan_only=japan_only,
+                since=since,
+                until=until,
+            )
+            return {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "items": [observation_dict(r) for r in rows],
+            }
+        finally:
+            session.close()
+
+    @app.get("/api/observations/latest")
+    def api_latest(limit: int = Query(25, ge=1, le=200)) -> dict[str, Any]:
+        session = db_session()
+        try:
+            rows = Repository(session).latest_observations(limit=limit)
+            return {"items": [observation_dict(r) for r in rows]}
+        finally:
+            session.close()
+
+    @app.get("/api/stations")
+    def api_stations(
+        limit: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+        japan_only: bool = False,
+    ) -> dict[str, Any]:
+        session = db_session()
+        try:
+            rows, total = Repository(session).list_stations(limit=limit, offset=offset, japan_only=japan_only)
+            return {
+                "total": total,
+                "items": [
+                    {
+                        "callsign": s.callsign,
+                        "last_grid": s.last_grid,
+                        "grid_source": s.grid_source,
+                        "country": s.country,
+                        "dxcc": s.dxcc,
+                        "continent": s.continent,
+                        "decode_count": s.decode_count,
+                        "last_heard_utc": s.last_heard_utc.isoformat() if s.last_heard_utc else None,
+                        "last_snr_db": s.last_snr_db,
+                        "last_distance_km": s.last_distance_km,
+                    }
+                    for s in rows
+                ],
+            }
+        finally:
+            session.close()
+
+    @app.get("/api/stations/{callsign}/history")
+    def api_station_history(callsign: str, limit: int = Query(100, ge=1, le=500)) -> dict[str, Any]:
+        session = db_session()
+        try:
+            repo = Repository(session)
+            station = repo.station_get(callsign)
+            if station is None:
+                raise HTTPException(status_code=404, detail="station not heard")
+            history = repo.station_history(callsign, limit=limit)
+            return {
+                "station": {
+                    "callsign": station.callsign,
+                    "last_grid": station.last_grid,
+                    "grid_source": station.grid_source,
+                    "country": station.country,
+                    "dxcc": station.dxcc,
+                    "decode_count": station.decode_count,
+                },
+                "items": [observation_dict(r) for r in history],
+            }
+        finally:
+            session.close()
+
+    @app.get("/api/stats/summary")
+    def api_summary(since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
+        session = db_session()
+        try:
+            if since is None:
+                since, until = today_bounds(datetime.now(tz=timezone.utc), config.analytics.display_timezone)
+            return summary(session, since=since, until=until)
+        finally:
+            session.close()
+
+    @app.get("/api/stats/countries")
+    def api_countries(since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
+        session = db_session()
+        try:
+            if since is None:
+                since, until = today_bounds(datetime.now(tz=timezone.utc), config.analytics.display_timezone)
+            return {"items": country_mix(session, since=since, until=until)}
+        finally:
+            session.close()
+
+    @app.get("/api/stats/distance")
+    def api_distance(since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
+        session = db_session()
+        try:
+            if since is None:
+                since, until = today_bounds(datetime.now(tz=timezone.utc), config.analytics.display_timezone)
+            return {"items": distance_histogram(session, since=since, until=until)}
+        finally:
+            session.close()
+
+    @app.get("/api/stats/snr")
+    def api_snr(since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
+        session = db_session()
+        try:
+            if since is None:
+                since, until = today_bounds(datetime.now(tz=timezone.utc), config.analytics.display_timezone)
+            return snr_histogram(session, since=since, until=until)
+        finally:
+            session.close()
+
+    @app.get("/api/stats/japan-hour")
+    def api_japan_hour(
+        bucket: int = Query(15),
+        since: datetime | None = None,
+        until: datetime | None = None,
+        tz: str | None = None,
+    ) -> dict[str, Any]:
+        session = db_session()
+        try:
+            display_tz = tz or config.analytics.display_timezone
+            if since is None:
+                since, until = today_bounds(datetime.now(tz=timezone.utc), display_tz)
+            return japan_hour_buckets(
+                session,
+                since=since,
+                until=until,
+                bucket_minutes=bucket,
+                display_timezone=display_tz,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            session.close()
+
+    @app.get("/api/export/csv")
+    def api_export_csv(since: datetime | None = None, until: datetime | None = None) -> StreamingResponse:
+        session = db_session()
+        try:
+            rows, _total = Repository(session).list_observations(limit=100_000, offset=0, since=since, until=until)
+            csv_text = observations_to_csv(rows)
+        finally:
+            session.close()
+        return StreamingResponse(
+            iter([csv_text]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=observations.csv"},
+        )
+
+    @app.get("/health")
+    def health() -> JSONResponse:
+        payload = api_status()
+        code = 200 if payload.get("db_writable") else 503
+        return JSONResponse(payload, status_code=code)
+
+    @app.get("/favicon.ico", response_model=None)
+    def favicon() -> FileResponse | JSONResponse:
+        icon = static_dir / "favicon.ico"
+        if icon.exists():
+            return FileResponse(icon)
+        return JSONResponse({}, status_code=204)
+
+    return app
