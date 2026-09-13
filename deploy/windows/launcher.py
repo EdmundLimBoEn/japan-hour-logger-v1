@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from contextlib import nullcontext
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import socket
 import sqlite3
@@ -60,15 +61,21 @@ def setup(_args: argparse.Namespace) -> None:
             print(f"Preserved the unusable environment at {preserved}", flush=True)
         print("Creating the local Python environment...", flush=True)
         venv.EnvBuilder(with_pip=True).create(VENV)
-    guard = nullcontext()
-    if usable and CONFIG.is_file():
-        try:
-            from radio_logger.lifecycle import logger_lock
-        except ImportError:
-            print("This older installation requires you to stop the logger before updating.", flush=True)
-        else:
-            guard = logger_lock(load_settings())
-    with guard:
+    with ExitStack() as guards:
+        if usable and CONFIG.is_file():
+            try:
+                cfg = load_settings()
+            except ModuleNotFoundError as exc:
+                if exc.name != "radio_logger":
+                    raise
+            else:
+                from radio_logger.database.backup import sqlite_path_from_url
+
+                # Older installed wheels lack the shared lock helper and use the data-folder lock.
+                locks = runpy.run_path(Path(__file__).resolve().parents[2] / "src/radio_logger/lifecycle.py")
+                guards.enter_context(locks["file_lock"](Path(cfg.paths.data_dir) / ".logger.lock"))
+                if sqlite_path_from_url(cfg.database.url) is not None:
+                    guards.enter_context(locks["logger_lock"](cfg))
         pip_available = subprocess.run(
             [str(PYTHON), "-m", "pip", "--version"],
             stdout=subprocess.DEVNULL,

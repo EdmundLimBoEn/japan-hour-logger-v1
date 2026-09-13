@@ -37,6 +37,14 @@ def test_config_accepts_utf8_bom(tmp_path):
     assert load_config(path).receiver.name == "日本 receiver"
 
 
+@pytest.mark.parametrize("section", ["udp", "http"])
+def test_loaded_configuration_rejects_ephemeral_ports(tmp_path, section):
+    path = tmp_path / "receiver.yaml"
+    path.write_text(f"{section}:\n  port: 0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=rf"Configured {section}\.port"):
+        load_config(path)
+
+
 def test_close_forgets_dial_before_instance_restarts(ingestor):
     ingestor.handle_datagram(encode_status(instance_id="A", dial_frequency_hz=14_074_000))
     ingestor.handle_datagram(encode_header(MessageTypeId.CLOSE, "A").dumps())

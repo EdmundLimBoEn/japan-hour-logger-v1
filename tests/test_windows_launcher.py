@@ -30,6 +30,7 @@ def launcher(tmp_path, monkeypatch):
     module.CONFIG.write_text(json.dumps({
         "receiver": {"locator": "OJ11"},
         "database": {"url": f"sqlite:///{(root / 'data/radio.db').as_posix()}"},
+        "paths": {"data_dir": str(root / "data")},
     }), encoding="utf-8")
     monkeypatch.setattr(module, "run_command", lambda *args: None)
     return module
@@ -126,6 +127,36 @@ def test_setup_refuses_to_update_a_running_logger(launcher, monkeypatch):
         with pytest.raises(RuntimeError, match="already in use"):
             launcher.setup(argparse.Namespace())
     assert commands == []
+
+
+def test_setup_locks_an_old_installation_and_allows_update_after_stop(launcher, monkeypatch):
+    from radio_logger.lifecycle import file_lock
+
+    monkeypatch.setitem(sys.modules, "radio_logger.lifecycle", None)
+    monkeypatch.setattr(launcher.subprocess, "run", lambda args, **kwargs:
+                        subprocess.CompletedProcess(args, 0))
+    commands = []
+    monkeypatch.setattr(launcher, "run_command", lambda *args: commands.append(args))
+    original_config = launcher.CONFIG.read_bytes()
+    with file_lock(Path(launcher.load_settings().paths.data_dir) / ".logger.lock"):
+        with pytest.raises(RuntimeError, match="already in use"):
+            launcher.setup(argparse.Namespace())
+    assert commands == []
+    launcher.setup(argparse.Namespace())
+    assert any("install" in args for args in commands)
+    assert launcher.CONFIG.read_bytes() == original_config
+
+
+def test_setup_allows_a_venv_without_the_logger_package(launcher, monkeypatch):
+    monkeypatch.delitem(sys.modules, "radio_logger")
+    monkeypatch.delitem(sys.modules, "radio_logger.config")
+    monkeypatch.setattr(sys, "path", [])
+    monkeypatch.setattr(launcher.subprocess, "run", lambda args, **kwargs:
+                        subprocess.CompletedProcess(args, 0))
+    commands = []
+    monkeypatch.setattr(launcher, "run_command", lambda *args: commands.append(args))
+    launcher.setup(argparse.Namespace())
+    assert any("install" in args for args in commands)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Executes the real Windows command processor")

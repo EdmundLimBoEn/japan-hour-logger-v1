@@ -8,7 +8,6 @@ from radio_logger.config import AppConfig
 from radio_logger.database.backup import sqlite_path_from_url
 
 
-@contextmanager
 def logger_lock(config: AppConfig):
     database = sqlite_path_from_url(config.database.url)
     path = (
@@ -16,6 +15,11 @@ def logger_lock(config: AppConfig):
         if database is not None
         else Path(config.paths.data_dir) / ".logger.lock"
     )
+    return file_lock(path)
+
+
+@contextmanager
+def file_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
         try:

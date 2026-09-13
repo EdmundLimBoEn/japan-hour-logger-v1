@@ -173,6 +173,9 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         existing = data.get(section)
         data[section] = {**(existing if isinstance(existing, dict) else {}), **values}
     cfg = AppConfig.model_validate(data)
+    for field, port in (("udp.port", cfg.udp.port), ("http.port", cfg.http.port)):
+        if port == 0:
+            raise ValueError(f"Configured {field} must be between 1 and 65535")
     cfg.resolve_paths(root)
     return cfg
 
