@@ -12,7 +12,7 @@
 - [x] Audit configuration, service lifecycle, API, and dashboard failure reporting.
 - [x] Add reproducible regression checks and Windows CI; verify an installed distribution.
 - [x] Phase D: Keep the audit trail.
-- [ ] Phase E: Verify and hand back.
+- [x] Phase E: Verify and hand back.
 
 ## Acceptance
 
@@ -39,8 +39,10 @@ Ground the runtime flow before editing. Sketch alternative shapes for any lifecy
 
 Boundary Discipline put input checks in YAML and WSJT-X parsers. Model the Domain kept the existing typed messages and added one bounded queue of packet bytes, source address, and receipt times. Make Operations Idempotent put live collection, imports, and setup behind a database lock released by the operating system. Prove It Works and Build the Lever expanded the repeatable installed-package check and regression suite.
 
-The baseline had 116 passing tests. The local integrated suite has 240 passing tests and six Windows-only cases awaiting CI. A fresh wheel passed the installed-package check outside the repository. Browser checks observed live data, a visible warning after malformed UDP, disconnection after server shutdown, and automatic reconnection with old rows preserved. The gstack browser lacked its Chromium runtime, so those UI checks used the built-in browser.
+The baseline had 116 passing tests. The local integrated suite has 242 passing tests and six Windows-only cases exercised by CI. A fresh wheel passed the installed-package check outside the repository. Browser checks observed live data, a visible warning after malformed UDP, disconnection after server shutdown, and automatic reconnection with old rows preserved. The gstack browser lacked its Chromium runtime, so those UI checks used the built-in browser.
 
 Independent reviews found and corrected the CLI writer lock bypass, unbounded receiver identifiers, and a shutdown deadline that discarded queued packets. Normal shutdown now drains the queue. The review used independent GPT agents because the configured alternative model families were unavailable in this tool set.
 
 The installed deslop and control-cli leaf skills were unavailable. Direct diff review, native Windows CMD tests, installed command execution, and browser checks provide the corresponding verification for this run.
+
+All six [CI jobs](https://github.com/EdmundLimBoEn/japan-hour-logger-v1/actions/runs/34756163407) passed for Windows and Linux on Python 3.12, 3.13, and 3.14. Windows 3.12 also ran the complete Setup Windows.cmd entry point. The remaining live-machine checks are in the setup guide.
