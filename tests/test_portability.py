@@ -37,6 +37,7 @@ def test_timezone_conversion_without_system_timezone_database():
         "web/templates/index.html",
         "web/static/app.js",
         "web/static/app.css",
+        "web/static/chart.umd.min.js",
     ],
 )
 def test_runtime_resources_are_bundled(name):

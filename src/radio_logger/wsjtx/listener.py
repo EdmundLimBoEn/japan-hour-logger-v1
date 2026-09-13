@@ -11,8 +11,15 @@ log = logging.getLogger(__name__)
 
 
 class _Protocol(asyncio.DatagramProtocol):
-    def __init__(self, callback: Callable[[bytes, tuple[str, int]], None]):
+    def __init__(
+        self,
+        callback: Callable[[bytes, tuple[str, int]], None],
+        on_error: Callable[[Exception], None] | None = None,
+        on_connection_lost: Callable[[Exception | None], None] | None = None,
+    ):
         self.callback = callback
+        self.on_error = on_error
+        self.on_connection_lost = on_connection_lost
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:  # type: ignore[override]
         try:
@@ -20,16 +27,34 @@ class _Protocol(asyncio.DatagramProtocol):
         except Exception:
             log.exception("UDP callback failed")
 
+    def error_received(self, exc: Exception) -> None:
+        log.warning("WSJT-X UDP socket error: %s", exc)
+        if self.on_error is not None:
+            self.on_error(exc)
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        if exc is not None:
+            log.warning("WSJT-X UDP socket closed: %s", exc)
+        if self.on_connection_lost is not None:
+            self.on_connection_lost(exc)
+
 
 async def start_udp_listener(
     config: UdpConfig,
     callback: Callable[[bytes, tuple[str, int]], None],
+    *,
+    on_error: Callable[[Exception], None] | None = None,
+    on_connection_lost: Callable[[Exception | None], None] | None = None,
 ) -> tuple[asyncio.DatagramTransport, str]:
     loop = asyncio.get_running_loop()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     host = config.host
     port = config.port
     try:
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+        except OSError:
+            log.warning("Using the default UDP receive buffer; a larger buffer was unavailable")
         if config.multicast:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(("", port))
@@ -40,10 +65,11 @@ async def start_udp_listener(
             if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
             sock.bind((host, port))
-            bound = f"{host}:{port}"
+            bound_host, bound_port = sock.getsockname()
+            bound = f"{bound_host}:{bound_port}"
         sock.setblocking(False)
         transport, _protocol = await loop.create_datagram_endpoint(
-            lambda: _Protocol(callback), sock=sock
+            lambda: _Protocol(callback, on_error, on_connection_lost), sock=sock
         )
     except BaseException:
         sock.close()

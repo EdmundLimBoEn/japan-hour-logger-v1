@@ -7,7 +7,7 @@ from itertools import islice
 from typing import Any
 
 from sqlalchemy import Select, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from radio_logger.database.models import AppEvent, Observation, Receiver, Session as RxSession, Station
 from radio_logger.ft8.callsign import extract_base_call
@@ -211,7 +211,7 @@ class Repository:
         return list(self.session.scalars(stmt))
 
     def iter_observations(self, *, chunk_size: int = 1000, **filters: Any) -> Iterator[Observation]:
-        stmt = self.observation_query(**filters).order_by(
+        stmt = self.observation_query(**filters).options(joinedload(Observation.receiver)).order_by(
             Observation.timestamp_utc.desc(), Observation.id.desc()
         )
         yield from self.session.scalars(stmt.execution_options(yield_per=chunk_size))

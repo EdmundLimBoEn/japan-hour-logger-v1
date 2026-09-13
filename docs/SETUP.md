@@ -53,7 +53,7 @@ py -3.12 --version
 
 Expect a Git version and `Python 3.12.x`. If `py` is unavailable but `python --version` shows Python 3.12 or newer, the setup helper can use `python`.
 
-If WSJT-X is missing, use the [official WSJT-X downloads](https://wsjt.sourceforge.io/downloads.html). Choose the installer for the school computer's operating system and architecture.
+For the Windows 11 deployment, install the 64-bit Windows build of [WSJT-X Improved Plus](https://sourceforge.net/projects/wsjt-x-improved/files/WSJT-X_v3.2.0/). The release checked on 13 September 2026 is `wsjtx-3.2.0-win64_improved_PLUS_260908.exe`. Use 64-bit x64 Python 3.12, 3.13, or 3.14 with the pinned packages. Native Windows ARM64 Python is not covered by this installation.
 
 ### 2. Clone and install the logger
 
@@ -187,9 +187,11 @@ If **Band Activity** stays empty, fix the receiver, audio input, clock, or FT8 m
 
 In WSJT-X, open **File > Settings > Reporting** and set:
 
-- **UDP Server** to `127.0.0.1`.
+- Primary **UDP Server** to `127.0.0.1`.
 - **UDP Server port number** to `2237`.
 - **Accept UDP requests** to unchecked.
+
+In Improved Plus, do not use **Secondary UDP Server** for this logger. That setting sends logged contacts rather than received decodes. Disable receive filters for the experiment because filtered messages can be omitted from UDP. No **Broadcast decodes** checkbox is required in this release. These behaviors were checked against the [Improved Plus release source](https://sourceforge.net/projects/wsjt-x-improved/files/WSJT-X_v3.2.0/Source%20code/wsjtx-3.2.0_improved_PLUS_260908.tgz/download).
 
 Click **OK**. The UDP server sends decoded messages and program status to other software. Accepting UDP requests is for incoming control commands and is not needed here. See the [WSJT-X Reporting settings](https://wsjt.sourceforge.io/wsjtx-main_en.html#_reporting).
 
@@ -219,13 +221,31 @@ Check these results in order:
 4. Within the next few receive cycles, matching messages appear under **Latest decodes**.
 5. **Today > Decodes** and **15 min** increase while WSJT-X receives messages.
 6. **Band** and **Dial** match the WSJT-X display after a status report arrives.
+7. **Lost packets / writes** stays at `0 / 0` and no error banner appears.
 
 The dashboard refreshes status and recent rows every five seconds. Charts refresh every fifteen seconds. A country or distance may be blank when the decode lacks enough information.
 
-For the underlying health result, open [logger status](http://127.0.0.1:8080/api/status). Check `ok: true`, `db_writable: true`, and an empty `last_error`. After live reception, `session_decodes` should increase. `udp_recently_seen` means a packet arrived in the last 30 seconds, so it can turn false during quiet periods.
+For the underlying health result, open [logger status](http://127.0.0.1:8080/api/status). Check `ok: true` and `db_writable: true`. `storage_error` and `udp_error` show active faults. `last_error` keeps the most recent historical issue for diagnosis, so it can remain after recovery. After live reception, `session_decodes` should increase. `udp_recently_seen` means a valid packet arrived in the last 60 seconds, so it can turn false during quiet periods.
 
 Press **Ctrl+C** in the logger window to stop it. On Windows, answer `Y` if the terminal asks whether to terminate the batch job. Start the logger again. Confirm that the previous real decodes remain and that new ones arrive.
 
 Create a backup using [the backup instructions](OPERATIONS.md#back-up-the-observations) before leaving the setup session.
 
 Keep the receiver software, WSJT-X, and the logger open during collection. Closing the browser is fine. Closing the logger window stops collection. Continue with [daily operation and troubleshooting](OPERATIONS.md).
+
+## Windows 11 acceptance checklist
+
+Before leaving the computer collecting, complete each check:
+
+- [ ] Run **Check Setup.cmd** and keep its PASS result.
+- [ ] Record the installed WSJT-X Improved Plus version and `git rev-parse HEAD`.
+- [ ] Confirm Windows clock synchronization, mains power, and sleep disabled while plugged in.
+- [ ] Confirm primary UDP `127.0.0.1:2237`, FT8 monitoring, receive filters disabled, and transmit disabled.
+- [ ] Confirm real WSJT-X messages appear on the dashboard, with the correct band and increasing counts.
+- [ ] Change bands, wait for fresh status, and verify new observations have the new frequency.
+- [ ] Close and restart WSJT-X. Confirm new decodes resume without restarting the logger.
+- [ ] Stop the logger with Ctrl+C and let queued packets finish. Start it again and verify old rows and new reception.
+- [ ] Run **Backup Data.cmd**, verify the copied backup, and copy it to another drive.
+- [ ] Locate WSJT-X **File > Open log directory** and preserve `ALL.TXT` as an independent reception record.
+
+After a power cut or Windows restart, sign in and reopen the receiver software, WSJT-X Improved Plus, and **Start Logger.cmd**. This repository does not install automatic login, restart Windows services, or control the receiver.

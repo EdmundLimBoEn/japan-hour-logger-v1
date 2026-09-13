@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass, field
 from datetime import datetime, time, timezone
@@ -138,7 +139,10 @@ class _Reader:
         return self.take(1)[0]
 
     def bool(self) -> bool:
-        return self.u8() != 0
+        value = self.u8()
+        if value not in (0, 1):
+            raise PacketError("invalid WSJT-X boolean")
+        return bool(value)
 
     def u32(self) -> int:
         return struct.unpack(">I", self.take(4))[0]
@@ -150,17 +154,21 @@ class _Reader:
         return struct.unpack(">Q", self.take(8))[0]
 
     def f64(self) -> float:
-        return struct.unpack(">d", self.take(8))[0]
+        value = struct.unpack(">d", self.take(8))[0]
+        if not math.isfinite(value):
+            raise PacketError("WSJT-X floating point value must be finite")
+        return value
 
     def utf8(self) -> str | None:
-        if self.remaining() < 4:
-            return None
         length = self.u32()
         if length == 0xFFFFFFFF:
             return None
         if length == 0:
             return ""
-        return self.take(length).decode("utf-8", errors="replace")
+        try:
+            return self.take(length).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise PacketError("invalid WSJT-X UTF-8 string") from exc
 
 
 class _Writer:
@@ -205,14 +213,16 @@ def parse_packet(data: bytes, received_at: datetime | None = None) -> WsjtxMessa
     if magic != MAGIC:
         raise PacketError(f"bad magic 0x{magic:08x}")
     schema = reader.u32()
+    if schema not in (2, 3):
+        raise PacketError(f"unsupported WSJT-X schema {schema}; expected 2 or 3")
     type_id = reader.u32()
-    instance_id = reader.utf8() or ""
+    instance_id = _required_utf8(reader, "instance ID")
     now = received_at or datetime.now(tz=UTC)
 
     if type_id == MessageTypeId.HEARTBEAT:
-        max_schema = reader.u32() if reader.remaining() >= 4 else None
-        version = reader.utf8() if reader.remaining() >= 4 else None
-        revision = reader.utf8() if reader.remaining() >= 4 else None
+        max_schema = reader.u32() if reader.remaining() else None
+        version = _opt_utf8(reader)
+        revision = _opt_utf8(reader)
         return HeartbeatMessage(
             instance_id=instance_id,
             max_schema=max_schema,
@@ -224,9 +234,11 @@ def parse_packet(data: bytes, received_at: datetime | None = None) -> WsjtxMessa
 
     if type_id == MessageTypeId.STATUS:
         msg = StatusMessage(instance_id=instance_id, schema=schema)
-        if reader.remaining() >= 8:
-            msg.dial_frequency_hz = reader.u64()
-        msg.mode = _opt_utf8(reader)
+        dial_frequency = reader.u64()
+        if dial_frequency > 2**63 - 1:
+            raise PacketError("WSJT-X dial frequency exceeds signed 64-bit storage")
+        msg.dial_frequency_hz = dial_frequency or None
+        msg.mode = _required_utf8(reader, "status mode")
         msg.dx_call = _opt_utf8(reader)
         msg.report = _opt_utf8(reader)
         msg.tx_mode = _opt_utf8(reader)
@@ -236,10 +248,10 @@ def parse_packet(data: bytes, received_at: datetime | None = None) -> WsjtxMessa
             msg.transmitting = reader.bool()
         if reader.remaining() >= 1:
             msg.decoding = reader.bool()
-        if reader.remaining() >= 4:
-            msg.rx_df = reader.i32()
-        if reader.remaining() >= 4:
-            msg.tx_df = reader.i32()
+        if reader.remaining():
+            msg.rx_df = reader.u32()
+        if reader.remaining():
+            msg.tx_df = reader.u32()
         msg.de_call = _opt_utf8(reader)
         msg.de_grid = _opt_utf8(reader)
         msg.dx_grid = _opt_utf8(reader)
@@ -250,9 +262,9 @@ def parse_packet(data: bytes, received_at: datetime | None = None) -> WsjtxMessa
             msg.fast_mode = reader.bool()
         if reader.remaining() >= 1:
             msg.special_op_mode = reader.u8()
-        if reader.remaining() >= 4:
+        if reader.remaining():
             msg.frequency_tolerance = reader.u32()
-        if reader.remaining() >= 4:
+        if reader.remaining():
             msg.tr_period = reader.u32()
         msg.configuration_name = _opt_utf8(reader)
         msg.tx_message = _opt_utf8(reader)
@@ -302,17 +314,17 @@ def parse_packet(data: bytes, received_at: datetime | None = None) -> WsjtxMessa
 
 
 def _opt_utf8(reader: _Reader) -> str | None:
-    if reader.remaining() < 4:
+    if not reader.remaining():
         return None
     return reader.utf8()
 
 
 def _required_utf8(reader: _Reader, field_name: str) -> str:
     if reader.remaining() < 4:
-        raise PacketError(f"decode missing {field_name}")
+        raise PacketError(f"WSJT-X packet missing {field_name}")
     value = reader.utf8()
     if not value:
-        raise PacketError(f"decode missing {field_name}")
+        raise PacketError(f"WSJT-X packet missing {field_name}")
     return value
 
 

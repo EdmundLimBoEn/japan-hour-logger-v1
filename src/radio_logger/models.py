@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from radio_logger.timeutil import as_utc
 
@@ -40,18 +40,20 @@ class ParsedFt8(BaseModel):
 
 
 class RawDecode(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     source: DecodeSource
     instance_id: str | None = None
     decode_time_utc: datetime
     snr_db: float | None = None
     dt: float | None = None
-    df: int | None = None
+    df: int | None = Field(default=None, ge=0, le=2**32 - 1)
     mode: str = "FT8"
     raw_message: str
     low_confidence: bool = False
     off_air: bool = False
     is_new: bool | None = None
-    dial_frequency_hz: int | None = None
+    dial_frequency_hz: int | None = Field(default=None, ge=0, le=2**63 - 1)
     raw_payload: dict[str, Any] = Field(default_factory=dict)
 
     def fingerprint(self) -> str:
@@ -133,6 +135,13 @@ class RuntimeState:
     last_message: str | None = None
     decode_count_session: int = 0
     duplicate_suppressed: int = 0
+    ignored_decodes: int = 0
+    parse_errors: int = 0
+    storage_failures: int = 0
+    storage_error: str | None = None
+    udp_error: str | None = None
+    queue_depth: int = 0
+    dropped_datagrams: int = 0
     receiver_status: ReceiverStatus = field(default_factory=ReceiverStatus)
     receiver_statuses: dict[str, ReceiverStatus] = field(default_factory=dict)
     udp_bound: str | None = None

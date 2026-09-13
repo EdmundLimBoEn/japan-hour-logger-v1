@@ -11,6 +11,8 @@ build/
 data/radio.db
 data/radio.db-*
 data/.logger.lock
+*.logger.lock
+.venv.broken-*/
 data/raw/
 data/exports/
 data/backups/
