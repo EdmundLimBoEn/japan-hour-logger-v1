@@ -160,7 +160,9 @@ def _environment_overrides() -> dict[str, dict[str, Any]]:
     return overrides
 
 
-def load_config(config_path: str | Path | None = None) -> AppConfig:
+def load_config(
+    config_path: str | Path | None = None, *, resolve_paths: bool = True
+) -> AppConfig:
     root = _project_root()
     selected_path = config_path or os.environ.get("RADIO_LOGGER_CONFIG")
     path = Path(selected_path) if selected_path else root / "config" / "receiver.yaml"
@@ -176,7 +178,8 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     for field, port in (("udp.port", cfg.udp.port), ("http.port", cfg.http.port)):
         if port == 0:
             raise ValueError(f"Configured {field} must be between 1 and 65535")
-    cfg.resolve_paths(root)
+    if resolve_paths:
+        cfg.resolve_paths(root)
     return cfg
 
 

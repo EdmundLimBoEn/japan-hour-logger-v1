@@ -48,6 +48,25 @@ def test_config_environment_overrides_yaml_with_documented_names(tmp_path, monke
     assert config.japan.dxcc_entities == ["Japan"]
 
 
+def test_config_can_preserve_effective_relative_paths(tmp_path, monkeypatch):
+    config_path = tmp_path / "receiver.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "database": {"url": "sqlite:///data/radio.db"},
+                "paths": {"raw_dir": "data/raw/wsjtx"},
+            }
+        )
+    )
+    monkeypatch.setenv("RADIO_LOGGER_PATHS__RAW_DIR", "data/raw/from-environment")
+
+    config = load_config(config_path, resolve_paths=False)
+
+    assert config.database.url == "sqlite:///data/radio.db"
+    assert config.paths.data_dir == "data"
+    assert config.paths.raw_dir == "data/raw/from-environment"
+
+
 def test_today_bounds_follow_local_midnights_across_dst():
     spring_start, spring_end = today_bounds(
         datetime(2026, 3, 8, 16, tzinfo=timezone.utc), "America/New_York"

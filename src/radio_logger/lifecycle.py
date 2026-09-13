@@ -3,12 +3,15 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from radio_logger.config import AppConfig
-from radio_logger.database.backup import sqlite_path_from_url
+if TYPE_CHECKING:
+    from radio_logger.config import AppConfig
 
 
 def logger_lock(config: AppConfig):
+    from radio_logger.database.backup import sqlite_path_from_url
+
     database = sqlite_path_from_url(config.database.url)
     path = (
         Path(str(database.resolve()) + ".logger.lock")

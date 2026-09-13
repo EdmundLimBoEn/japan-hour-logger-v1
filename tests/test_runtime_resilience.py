@@ -75,8 +75,20 @@ def test_status_database_error_returns_structured_failure(config, session_factor
     def fail(*args, **kwargs):
         raise OSError("database unavailable")
 
-    monkeypatch.setattr(Repository, "latest_observations", fail)
     client = TestClient(create_app(config, session_factory, runtime), raise_server_exceptions=False)
+    healthy_keys = set(client.get("/api/status").json())
+    monkeypatch.setattr(Repository, "latest_observations", fail)
+    status = client.get("/api/status")
+    assert status.status_code == 200
+    payload = status.json()
+    assert set(payload) == healthy_keys
+    assert payload["ok"] is False
+    assert payload["decodes_today"] is None
+    assert payload["decodes_15m"] is None
+    assert payload["session_decodes"] == 0
+    assert payload["uptime_seconds"] >= 0
+    assert payload["receiver"]["id"] == config.receiver.id
+
     response = client.get("/health")
     assert response.status_code == 503
     assert response.json()["ok"] is False

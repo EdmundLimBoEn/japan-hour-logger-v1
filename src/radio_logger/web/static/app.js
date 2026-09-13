@@ -76,9 +76,9 @@ async function refreshStatus() {
   document.getElementById("f-uptime").textContent = fmtAge(s.uptime_seconds);
   document.getElementById("f-queue").textContent = s.queue_depth ?? 0;
   document.getElementById("f-loss").textContent = (s.dropped_datagrams ?? 0) + " / " + (s.storage_failures ?? 0);
-  document.getElementById("f-today").textContent = s.decodes_today;
-  document.getElementById("f-today-ja").textContent = s.japan_decodes_today;
-  document.getElementById("f-15").textContent = s.decodes_15m + " / JA " + s.japan_decodes_15m;
+  document.getElementById("f-today").textContent = s.decodes_today ?? "--";
+  document.getElementById("f-today-ja").textContent = s.japan_decodes_today ?? "--";
+  document.getElementById("f-15").textContent = (s.decodes_15m ?? "--") + " / JA " + (s.japan_decodes_15m ?? "--");
   const mb = s.db_size_bytes != null ? (s.db_size_bytes / 1024 / 1024).toFixed(2) + " MB" : "--";
   document.getElementById("f-db").textContent = (s.db_writable ? "ok · " : "ERR · ") + mb;
 }

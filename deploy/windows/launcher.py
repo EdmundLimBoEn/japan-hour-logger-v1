@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import runpy
-import shutil
 import socket
 import sqlite3
 import subprocess
@@ -31,12 +30,12 @@ def run_command(*args: str | Path) -> None:
     subprocess.run([str(arg) for arg in args], cwd=ROOT, check=True)
 
 
-def load_settings():
+def load_settings(*, resolve_paths: bool = True):
     from radio_logger.config import load_config
 
     if not CONFIG.is_file():
         raise RuntimeError("Configuration is missing. Run Setup Windows.cmd first.")
-    return load_config(CONFIG)
+    return load_config(CONFIG, resolve_paths=resolve_paths)
 
 
 def setup(_args: argparse.Namespace) -> None:
@@ -63,19 +62,31 @@ def setup(_args: argparse.Namespace) -> None:
         venv.EnvBuilder(with_pip=True).create(VENV)
     with ExitStack() as guards:
         if usable and CONFIG.is_file():
-            try:
-                cfg = load_settings()
-            except ModuleNotFoundError as exc:
-                if exc.name != "radio_logger":
-                    raise
-            else:
-                from radio_logger.database.backup import sqlite_path_from_url
-
-                # Older installed wheels lack the shared lock helper and use the data-folder lock.
+            # Release native dependency DLLs before pip updates this environment on Windows.
+            probe = subprocess.run(
+                [str(PYTHON), "-c",
+                 "import importlib.util, json, pathlib, sys; "
+                 "sys.exit(10) if importlib.util.find_spec('radio_logger') is None else None; "
+                 "from radio_logger.config import load_config; "
+                 "from radio_logger.database.backup import sqlite_path_from_url; "
+                 "cfg = load_config(sys.argv[1]); db = sqlite_path_from_url(cfg.database.url); "
+                 "paths = [str(pathlib.Path(cfg.paths.data_dir) / '.logger.lock')]; "
+                 "paths += [str(db.resolve()) + '.logger.lock'] if db is not None else []; "
+                "print(json.dumps(paths))", str(CONFIG)],
+                cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
+                env=dict(os.environ, PYTHONUTF8="1"),
+            )
+            if probe.returncode not in {0, 10}:
+                raise RuntimeError(
+                    "Cannot check the existing installation safely. "
+                    "Fix any configuration error shown below. If a Python dependency is missing, "
+                    "close all logger windows, rename .venv to an unused backup name, then run "
+                    "Setup Windows.cmd again. Keep config and data.\n" + probe.stderr.strip()
+                )
+            if probe.returncode == 0:
                 locks = runpy.run_path(Path(__file__).resolve().parents[2] / "src/radio_logger/lifecycle.py")
-                guards.enter_context(locks["file_lock"](Path(cfg.paths.data_dir) / ".logger.lock"))
-                if sqlite_path_from_url(cfg.database.url) is not None:
-                    guards.enter_context(locks["logger_lock"](cfg))
+                for path in dict.fromkeys(json.loads(probe.stdout)):
+                    guards.enter_context(locks["file_lock"](Path(path)))
         pip_available = subprocess.run(
             [str(PYTHON), "-m", "pip", "--version"],
             stdout=subprocess.DEVNULL,
@@ -178,15 +189,22 @@ def start(args: argparse.Namespace) -> None:
 
 
 def backup(_args: argparse.Namespace) -> None:
+    import yaml
+
     from radio_logger.database.backup import backup_sqlite, sqlite_path_from_url
 
-    cfg = load_settings()
+    cfg = load_settings(resolve_paths=False)
+    config_snapshot = cfg.model_dump(mode="json")
+    cfg.resolve_paths(ROOT)
     database = sqlite_path_from_url(cfg.database.url)
     if database is None or not database.is_file():
         raise RuntimeError("No SQLite database to back up yet. Start the logger first.")
     destination = backup_sqlite(cfg.database.url, cfg.paths.backups_dir)
     config_copy = destination.with_suffix(".yaml")
-    shutil.copy2(CONFIG, config_copy)
+    config_copy.write_text(
+        yaml.safe_dump(config_snapshot, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
     print(f"Database backup: {destination}")
     print(f"Configuration copy: {config_copy}")
     print("The database backup includes all stored observations and is safe while logging.")

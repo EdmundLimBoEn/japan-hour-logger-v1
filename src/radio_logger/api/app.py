@@ -101,21 +101,25 @@ def create_app(
     @app.get("/api/status")
     def api_status() -> dict[str, Any]:
         now = datetime.now(tz=timezone.utc)
+        last_15 = now - timedelta(minutes=15)
+        start_today, end_today = today_bounds(now, config.analytics.display_timezone)
+        last_decode_age = (
+            (now - runtime.last_decode_at).total_seconds()
+            if runtime.last_decode_at
+            else None
+        )
+        udp_age = (
+            (now - runtime.last_udp_at).total_seconds()
+            if runtime.last_udp_at
+            else None
+        )
         session = db_session()
         try:
             repo = Repository(session)
-            last_15 = now - timedelta(minutes=15)
-            start_today, end_today = today_bounds(now, config.analytics.display_timezone)
             last_row = repo.latest_observations(limit=1)
             last_obs = (
                 observation_dict(last_row[0], config.receiver.timezone) if last_row else None
             )
-            last_decode_age = None
-            if runtime.last_decode_at:
-                last_decode_age = (now - runtime.last_decode_at).total_seconds()
-            udp_age = None
-            if runtime.last_udp_at:
-                udp_age = (now - runtime.last_udp_at).total_seconds()
             udp_recent = udp_age is not None and 0 <= udp_age < 60 and not runtime.udp_error
             size = database_size_bytes(config.database.url)
             status = runtime.receiver_status
@@ -172,12 +176,40 @@ def create_app(
                 "online": False,
                 "udp_recently_seen": False,
                 "udp_bound": runtime.udp_bound,
+                "udp_age_seconds": udp_age,
+                "last_heartbeat_at": runtime.last_heartbeat_at.isoformat() if runtime.last_heartbeat_at else None,
+                "last_decode_at": runtime.last_decode_at.isoformat() if runtime.last_decode_at else None,
+                "last_decode_age_seconds": last_decode_age,
+                "last_decode": None,
+                "decodes_15m": None,
+                "japan_decodes_15m": None,
+                "decodes_today": None,
+                "japan_decodes_today": None,
+                "session_decodes": runtime.decode_count_session,
+                "duplicates_suppressed": runtime.duplicate_suppressed,
+                "ignored_decodes": runtime.ignored_decodes,
+                "parse_errors": runtime.parse_errors,
                 "db_writable": False,
                 "storage_error": str(exc),
                 "last_error": f"Database unavailable: {exc}",
                 "storage_failures": runtime.storage_failures,
                 "dropped_datagrams": runtime.dropped_datagrams,
                 "queue_depth": runtime.queue_depth,
+                "udp_error": runtime.udp_error,
+                "db_size_bytes": None,
+                "uptime_seconds": (now - runtime.started_at).total_seconds(),
+                "dial_frequency_hz": runtime.receiver_status.dial_frequency_hz,
+                "band": band_from_hz(runtime.receiver_status.dial_frequency_hz),
+                "mode": runtime.receiver_status.mode,
+                "receiver": {
+                    "id": config.receiver.id,
+                    "name": config.receiver.name,
+                    "locator": config.receiver.locator,
+                    "timezone": config.receiver.timezone,
+                },
+                "display_timezone": config.analytics.display_timezone,
+                "today_start_utc": start_today.isoformat(),
+                "today_end_utc": end_today.isoformat(),
             }
         finally:
             session.close()

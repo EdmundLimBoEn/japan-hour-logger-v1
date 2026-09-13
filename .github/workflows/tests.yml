@@ -30,7 +30,10 @@ jobs:
       - run: python -m pytest -q
       - name: Verify installed assets, UDP, API, export, backup, and restart
         run: python scripts/verify-install.py
-      - name: Test the Windows setup entry point
+      - name: Test fresh and repeated Windows setup
         if: runner.os == 'Windows' && matrix.python == '3.12'
         shell: cmd
-        run: call "Setup Windows.cmd" --no-pause
+        run: |
+          call "Setup Windows.cmd" --no-pause
+          if errorlevel 1 exit /b 1
+          call "Setup Windows.cmd" --no-pause

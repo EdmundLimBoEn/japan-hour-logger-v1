@@ -225,7 +225,7 @@ Check these results in order:
 
 The dashboard refreshes status and recent rows every five seconds. Charts refresh every fifteen seconds. A country or distance may be blank when the decode lacks enough information.
 
-For the underlying health result, open [logger status](http://127.0.0.1:8080/api/status). Check `ok: true`, `db_writable: true`, and an empty `last_error`. After live reception, `session_decodes` should increase. `udp_recently_seen` means a valid packet arrived in the last 60 seconds, so it can turn false during quiet periods.
+For the underlying health result, open [logger status](http://127.0.0.1:8080/api/status). Check `ok: true` and `db_writable: true`. `storage_error` and `udp_error` show active faults. `last_error` keeps the most recent historical issue for diagnosis, so it can remain after recovery. After live reception, `session_decodes` should increase. `udp_recently_seen` means a valid packet arrived in the last 60 seconds, so it can turn false during quiet periods.
 
 Press **Ctrl+C** in the logger window to stop it. On Windows, answer `Y` if the terminal asks whether to terminate the batch job. Start the logger again. Confirm that the previous real decodes remain and that new ones arrive.
 

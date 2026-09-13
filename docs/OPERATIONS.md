@@ -36,7 +36,7 @@ Stop WSJT-X and the receiver software when reception is finished. Existing obser
 
 ## Check the current state
 
-Open [logger status](http://127.0.0.1:8080/api/status) while the logger runs. A healthy local service reports `ok: true`, `db_writable: true`, and an empty `last_error`. Real reception increases `session_decodes` and updates `last_decode_at`.
+Open [logger status](http://127.0.0.1:8080/api/status) while the logger runs. A healthy local service reports `ok: true`, `db_writable: true`, and no active `storage_error` or `udp_error`. `last_error` keeps the most recent historical issue for diagnosis, so it can remain after recovery. Real reception increases `session_decodes` and updates `last_decode_at`.
 
 For stored totals, run the following on Windows:
 
@@ -64,7 +64,7 @@ On Windows, double-click **Backup Data.cmd**, or run:
 & '.\Backup Data.cmd'
 ```
 
-The helper creates a database backup and a matching configuration copy under `data/backups`. It prints both paths. The database backup is safe while the logger runs.
+The helper creates a database backup and a matching effective configuration copy under `data/backups`. The copy includes `RADIO_LOGGER_*` overrides and keeps relative storage paths portable. The helper prints both paths. The database backup is safe while the logger runs.
 
 On Linux, use SQLite's online backup command while the logger runs, or after stopping it:
 
@@ -263,4 +263,4 @@ The logger retries an unexpectedly closed UDP socket once per second. A port alr
 
 SQLite uses WAL with FULL synchronization. Backups become final `.db` files only after verification and flush. CSV exports replace their destination only after the complete export succeeds. None of these protects against a failed physical disk, so keep verified backups on another device.
 
-Setup preserves an unusable Python environment as `.venv.broken-*` before rebuilding it. Keep the old environment until the replacement passes **Check Setup.cmd**. Always stop the logger before updating, especially when upgrading a release that predates the database lock.
+Setup preserves an unusable Python environment as `.venv.broken-*` before rebuilding it. Keep the old environment until the replacement passes **Check Setup.cmd**. If Setup cannot safely inspect an existing installation because a dependency is missing, close every logger window, rename `.venv` to an unused backup name, and run **Setup Windows.cmd** again. Keep `config` and `data`. Always stop the logger before updating, especially when upgrading a release that predates the database lock.
