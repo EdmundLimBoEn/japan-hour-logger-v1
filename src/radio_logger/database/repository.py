@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import datetime
+from itertools import islice
 from typing import Any
 
 from sqlalchemy import Select, func, select
@@ -10,6 +12,7 @@ from sqlalchemy.orm import Session
 from radio_logger.database.models import AppEvent, Observation, Receiver, Session as RxSession, Station
 from radio_logger.ft8.callsign import extract_base_call
 from radio_logger.models import NormalizedDecode
+from radio_logger.timeutil import as_utc
 
 
 class Repository:
@@ -109,26 +112,30 @@ class Repository:
         key = extract_base_call(decoded.tx_callsign)
         station = self.session.get(Station, key)
         if station is None:
-            station = Station(callsign=key, decode_count=0, first_heard_utc=decoded.timestamp_utc)
+            station = Station(callsign=key, decode_count=0)
             self.session.add(station)
-        if decoded.tx_grid and (decoded.grid_source == "message" or station.last_grid is None):
-            station.last_grid = decoded.tx_grid
-            station.grid_source = decoded.grid_source
-        if decoded.country:
-            station.country = decoded.country
-        if decoded.dxcc:
-            station.dxcc = decoded.dxcc
-        if decoded.continent:
-            station.continent = decoded.continent
-        if decoded.cqz is not None:
-            station.cqz = decoded.cqz
-        if decoded.ituz is not None:
-            station.ituz = decoded.ituz
-        station.last_heard_utc = decoded.timestamp_utc
-        station.first_heard_utc = station.first_heard_utc or decoded.timestamp_utc
+        observed_at = as_utc(decoded.timestamp_utc)
+        is_latest = station.last_heard_utc is None or observed_at >= as_utc(station.last_heard_utc)
+        if is_latest:
+            if decoded.tx_grid:
+                station.last_grid = decoded.tx_grid
+                station.grid_source = decoded.grid_source
+            if decoded.country:
+                station.country = decoded.country
+            if decoded.dxcc:
+                station.dxcc = decoded.dxcc
+            if decoded.continent:
+                station.continent = decoded.continent
+            if decoded.cqz is not None:
+                station.cqz = decoded.cqz
+            if decoded.ituz is not None:
+                station.ituz = decoded.ituz
+            station.last_heard_utc = observed_at
+            station.last_snr_db = decoded.snr_db
+            station.last_distance_km = decoded.distance_km
+        if station.first_heard_utc is None or observed_at < as_utc(station.first_heard_utc):
+            station.first_heard_utc = observed_at
         station.decode_count = (station.decode_count or 0) + 1
-        station.last_snr_db = decoded.snr_db
-        station.last_distance_km = decoded.distance_km
 
     def add_event(
         self,
@@ -172,10 +179,16 @@ class Repository:
         if japan_only:
             stmt = stmt.where(Observation.is_japan.is_(True))
         if since:
-            stmt = stmt.where(Observation.timestamp_utc >= since)
+            stmt = stmt.where(Observation.timestamp_utc >= self._database_datetime(since))
         if until:
-            stmt = stmt.where(Observation.timestamp_utc < until)
+            stmt = stmt.where(Observation.timestamp_utc < self._database_datetime(until))
         return stmt
+
+    def _database_datetime(self, value: datetime) -> datetime:
+        utc = as_utc(value)
+        if self.session.get_bind().dialect.name == "sqlite":
+            return utc.replace(tzinfo=None)
+        return utc
 
     def list_observations(
         self,
@@ -197,8 +210,25 @@ class Repository:
             stmt = stmt.where(Observation.receiver_id == receiver_id)
         return list(self.session.scalars(stmt))
 
-    def count_since(self, since: datetime, *, japan_only: bool = False, receiver_id: str | None = None) -> int:
-        stmt = select(func.count()).select_from(Observation).where(Observation.timestamp_utc >= since)
+    def iter_observations(self, *, chunk_size: int = 1000, **filters: Any) -> Iterator[Observation]:
+        stmt = self.observation_query(**filters).order_by(
+            Observation.timestamp_utc.desc(), Observation.id.desc()
+        )
+        yield from self.session.scalars(stmt.execution_options(yield_per=chunk_size))
+
+    def count_since(
+        self,
+        since: datetime,
+        *,
+        until: datetime | None = None,
+        japan_only: bool = False,
+        receiver_id: str | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(Observation).where(
+            Observation.timestamp_utc >= self._database_datetime(since)
+        )
+        if until:
+            stmt = stmt.where(Observation.timestamp_utc < self._database_datetime(until))
         if japan_only:
             stmt = stmt.where(Observation.is_japan.is_(True))
         if receiver_id:
@@ -223,8 +253,9 @@ class Repository:
         base = extract_base_call(key)
         stmt = (
             select(Observation)
-            .where((Observation.tx_callsign == key) | (Observation.tx_callsign.like(f"%{base}%")))
+            .where(func.upper(Observation.tx_callsign).contains(base, autoescape=True))
             .order_by(Observation.timestamp_utc.desc())
-            .limit(limit)
         )
-        return list(self.session.scalars(stmt))
+        rows = self.session.scalars(stmt.execution_options(yield_per=min(limit, 1000)))
+        matches = (row for row in rows if extract_base_call(row.tx_callsign or "") == base)
+        return list(islice(matches, limit))

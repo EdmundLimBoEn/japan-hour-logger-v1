@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, get_origin
 
 import yaml
 from pydantic import BaseModel, Field
@@ -112,12 +114,33 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+def _environment_overrides() -> dict[str, dict[str, Any]]:
+    overrides: dict[str, dict[str, Any]] = {}
+    for section_name, section_field in AppConfig.model_fields.items():
+        section_type = section_field.annotation
+        if not isinstance(section_type, type) or not issubclass(section_type, BaseModel):
+            continue
+        for field_name, field in section_type.model_fields.items():
+            single_name = f"RADIO_LOGGER_{section_name}_{field_name}".upper()
+            nested_name = f"RADIO_LOGGER_{section_name}__{field_name}".upper()
+            value = os.environ.get(nested_name, os.environ.get(single_name))
+            if value is not None:
+                if get_origin(field.annotation) is list:
+                    value = json.loads(value)
+                overrides.setdefault(section_name, {})[field_name] = value
+    return overrides
+
+
 def load_config(config_path: str | Path | None = None) -> AppConfig:
     root = _project_root()
-    path = Path(config_path) if config_path else root / "config" / "receiver.yaml"
+    selected_path = config_path or os.environ.get("RADIO_LOGGER_CONFIG")
+    path = Path(selected_path) if selected_path else root / "config" / "receiver.yaml"
     if not path.is_absolute():
         path = (root / path).resolve() if not path.exists() else path.resolve()
     data = _load_yaml(path)
+    for section, values in _environment_overrides().items():
+        existing = data.get(section)
+        data[section] = {**(existing if isinstance(existing, dict) else {}), **values}
     cfg = AppConfig.model_validate(data)
     cfg.resolve_paths(root)
     return cfg

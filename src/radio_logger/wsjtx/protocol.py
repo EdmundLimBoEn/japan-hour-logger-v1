@@ -260,13 +260,13 @@ def parse_packet(data: bytes, received_at: datetime | None = None) -> WsjtxMessa
         return msg
 
     if type_id == MessageTypeId.DECODE:
-        is_new = reader.bool() if reader.remaining() >= 1 else True
-        time_ms = reader.u32() if reader.remaining() >= 4 else 0
-        snr = reader.i32() if reader.remaining() >= 4 else 0
-        dt = reader.f64() if reader.remaining() >= 8 else 0.0
-        df = reader.u32() if reader.remaining() >= 4 else 0
-        mode = _opt_utf8(reader) or "FT8"
-        message = _opt_utf8(reader) or ""
+        is_new = reader.bool()
+        time_ms = reader.u32()
+        snr = reader.i32()
+        dt = reader.f64()
+        df = reader.u32()
+        mode = _required_utf8(reader, "mode")
+        message = _required_utf8(reader, "message")
         low_confidence = reader.bool() if reader.remaining() >= 1 else False
         off_air = reader.bool() if reader.remaining() >= 1 else False
         decode_time = _qtime_to_datetime(now, time_ms)
@@ -283,7 +283,7 @@ def parse_packet(data: bytes, received_at: datetime | None = None) -> WsjtxMessa
             off_air=off_air,
             schema=schema,
             decode_time_utc=decode_time,
-            raw={"type": "decode", "schema": schema, "is_new": is_new},
+            raw={"type": "decode", "schema": schema, "is_new": is_new, "mode": mode},
         )
 
     if type_id == MessageTypeId.CLEAR:
@@ -307,12 +307,23 @@ def _opt_utf8(reader: _Reader) -> str | None:
     return reader.utf8()
 
 
+def _required_utf8(reader: _Reader, field_name: str) -> str:
+    if reader.remaining() < 4:
+        raise PacketError(f"decode missing {field_name}")
+    value = reader.utf8()
+    if not value:
+        raise PacketError(f"decode missing {field_name}")
+    return value
+
+
 def _qtime_to_datetime(now: datetime, millis: int) -> datetime:
+    if not 0 <= millis < 24 * 60 * 60 * 1000:
+        raise PacketError(f"invalid QTime milliseconds: {millis}")
     now = now.astimezone(UTC) if now.tzinfo else now.replace(tzinfo=UTC)
     seconds, milli = divmod(int(millis), 1000)
     hours, rem = divmod(seconds, 3600)
     minutes, secs = divmod(rem, 60)
-    decoded = datetime.combine(now.date(), time(hours % 24, minutes, secs, milli * 1000), tzinfo=UTC)
+    decoded = datetime.combine(now.date(), time(hours, minutes, secs, milli * 1000), tzinfo=UTC)
     # Around UTC midnight the QTime day may belong to yesterday or tomorrow.
     delta = (decoded - now).total_seconds()
     if delta > 12 * 3600:

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Japan Hour Logger</title>
   <link rel="stylesheet" href="/static/app.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="/static/chart.umd.min.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -79,11 +79,11 @@
   </section>
 
   <script>
-    window.LOGGER_META = {
-      receiverLocator: "{{ receiver.locator }}",
-      udp: "{{ udp.host }}:{{ udp.port }}",
-      version: "{{ version }}"
-    };
+    window.LOGGER_META = {{ {
+      "receiverLocator": receiver.locator,
+      "udp": udp.host ~ ":" ~ udp.port,
+      "version": version
+    } | tojson }};
   </script>
   <script src="/static/app.js"></script>
 </body>

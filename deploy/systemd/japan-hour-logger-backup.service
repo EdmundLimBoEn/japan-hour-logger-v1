@@ -1,0 +1,26 @@
+[Unit]
+Description=Back up the Japan Hour logger SQLite database
+After=japan-hour-logger.service
+
+[Service]
+Type=oneshot
+User=radio-logger
+Group=radio-logger
+WorkingDirectory=/var/lib/japan-hour-logger
+ExecStart=/opt/japan-hour-logger/venv/bin/radio-logger db-backup --config /etc/japan-hour-logger/receiver.yaml
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/japan-hour-logger

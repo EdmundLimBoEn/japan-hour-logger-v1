@@ -109,22 +109,28 @@ def export_cmd(
     if fmt != "csv":
         raise typer.BadParameter("V1 supports --format csv only")
     from radio_logger.database.repository import Repository
-    from radio_logger.export_csv import observations_to_csv
+    from radio_logger.export_csv import iter_observations_csv
     from radio_logger.service import init_database
 
     cfg = _cfg(config)
-    factory = init_database(cfg)
-    session = factory()
-    try:
-        rows, total = Repository(session).list_observations(
-            limit=1_000_000, offset=0, since=_parse_utc(since), until=_parse_utc(until)
-        )
-        csv_text = observations_to_csv(rows)
-    finally:
-        session.close()
     dest = output or Path(cfg.paths.exports_dir) / "observations.csv"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(csv_text, encoding="utf-8")
+    factory = init_database(cfg)
+    session = factory()
+    total = 0
+    try:
+        rows = Repository(session).iter_observations(
+            since=_parse_utc(since), until=_parse_utc(until)
+        )
+        with dest.open("w", encoding="utf-8", newline="") as handle:
+            for index, chunk in enumerate(
+                iter_observations_csv(rows, cfg.receiver.timezone)
+            ):
+                handle.write(chunk)
+                if index:
+                    total += 1
+    finally:
+        session.close()
     typer.echo(f"wrote {total} rows to {dest}")
 
 

@@ -53,18 +53,19 @@ ISO = re.compile(
 )
 
 
-def parse_all_txt(text: str, *, default_dial_hz: int | None = 14_074_000) -> list[RawDecode]:
+def parse_all_txt(text: str, *, default_dial_hz: int | None = None) -> list[RawDecode]:
     return list(iter_all_txt_lines(text.splitlines(), default_dial_hz=default_dial_hz))
 
 
-def parse_all_txt_file(path: Path, *, default_dial_hz: int | None = 14_074_000) -> list[RawDecode]:
-    return list(iter_all_txt_lines(path.read_text(errors="replace").splitlines(), default_dial_hz=default_dial_hz))
+def parse_all_txt_file(path: Path, *, default_dial_hz: int | None = None) -> list[RawDecode]:
+    with path.open(errors="replace") as lines:
+        return list(iter_all_txt_lines(lines, default_dial_hz=default_dial_hz))
 
 
 def iter_all_txt_lines(
-    lines: list[str] | Iterator[str],
+    lines: Iterator[str] | list[str],
     *,
-    default_dial_hz: int | None = 14_074_000,
+    default_dial_hz: int | None = None,
 ) -> Iterator[RawDecode]:
     for line_no, raw_line in enumerate(lines, start=1):
         line = raw_line.strip()

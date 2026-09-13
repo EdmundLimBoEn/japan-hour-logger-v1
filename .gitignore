@@ -10,9 +10,11 @@ dist/
 build/
 data/radio.db
 data/radio.db-*
+data/.logger.lock
 data/raw/
 data/exports/
 data/backups/
 *.log
 .env
 .DS_Store
+.gstack/

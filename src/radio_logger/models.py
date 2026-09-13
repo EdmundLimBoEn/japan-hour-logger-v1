@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from radio_logger.timeutil import as_utc
 
 GridSource = Literal["message", "cache", "external", "none"]
 DecodeSource = Literal["udp", "all_txt", "jsonl", "simulator"]
@@ -51,12 +55,21 @@ class RawDecode(BaseModel):
     raw_payload: dict[str, Any] = Field(default_factory=dict)
 
     def fingerprint(self) -> str:
-        instance = self.instance_id or "-"
-        time_key = self.decode_time_utc.strftime("%H:%M:%S")
-        snr = "" if self.snr_db is None else f"{self.snr_db:.1f}"
-        dt = "" if self.dt is None else f"{self.dt:.1f}"
-        df = "" if self.df is None else str(int(self.df))
-        return f"{instance}|{time_key}|{snr}|{dt}|{df}|{self.raw_message}"
+        fields = {
+            "source": self.source,
+            "instance_id": self.instance_id,
+            "decode_time_utc": as_utc(self.decode_time_utc).isoformat(timespec="microseconds"),
+            "snr_db": self.snr_db,
+            "dt": self.dt,
+            "df": self.df,
+            "mode": self.mode,
+            "raw_message": self.raw_message,
+            "low_confidence": self.low_confidence,
+            "off_air": self.off_air,
+            "dial_frequency_hz": self.dial_frequency_hz,
+        }
+        payload = json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class NormalizedDecode(BaseModel):
@@ -121,5 +134,6 @@ class RuntimeState:
     decode_count_session: int = 0
     duplicate_suppressed: int = 0
     receiver_status: ReceiverStatus = field(default_factory=ReceiverStatus)
+    receiver_statuses: dict[str, ReceiverStatus] = field(default_factory=dict)
     udp_bound: str | None = None
     last_error: str | None = None

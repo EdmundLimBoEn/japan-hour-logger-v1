@@ -65,7 +65,7 @@ class Ingestor:
 
     def handle_datagram(self, data: bytes, addr: tuple[str, int] | None = None) -> Observation | None:
         self.runtime.last_udp_at = datetime.now(tz=timezone.utc)
-        self._archive_raw_bytes(data)
+        self._archive_optional(self._archive_raw_bytes, data)
         try:
             message = parse_packet(data)
         except Exception as exc:
@@ -79,7 +79,10 @@ class Ingestor:
         if isinstance(message, HeartbeatMessage):
             self.runtime.last_heartbeat_at = now
             if message.instance_id:
-                self.runtime.receiver_status.instance_id = message.instance_id
+                status = self.runtime.receiver_statuses.setdefault(
+                    message.instance_id, ReceiverStatus(instance_id=message.instance_id)
+                )
+                self.runtime.receiver_status = status
             return None
         if isinstance(message, StatusMessage):
             self._apply_status(message, now)
@@ -93,27 +96,26 @@ class Ingestor:
             self._event("wsjtx_close", f"close from {message.instance_id}")
             return None
         if isinstance(message, DecodeMessage):
-            return self.ingest_raw(_decode_to_raw(message, self.runtime.receiver_status))
+            status = self.runtime.receiver_statuses.get(message.instance_id)
+            return self.ingest_raw(_decode_to_raw(message, status))
         return None
 
     def ingest_raw(self, raw: RawDecode, *, skip_dedupe: bool = False) -> Observation | None:
-        if not skip_dedupe and self.dedupe.is_duplicate(raw):
+        if raw.dial_frequency_hz is None and raw.source == "udp" and raw.instance_id:
+            status = self.runtime.receiver_statuses.get(raw.instance_id)
+            if status is not None:
+                raw.dial_frequency_hz = status.dial_frequency_hz
+        use_network_dedupe = raw.source == "udp" and not skip_dedupe
+        if use_network_dedupe and self.dedupe.contains(raw):
             self.runtime.duplicate_suppressed += 1
             return None
-        if raw.dial_frequency_hz is None and self.runtime.receiver_status.dial_frequency_hz:
-            raw.dial_frequency_hz = self.runtime.receiver_status.dial_frequency_hz
         normalized = enrich_or_passthrough(self.enricher, raw)
         session = self.session_factory()
+        session.expire_on_commit = False
         try:
             repo = Repository(session)
             row = repo.insert_observation(normalized, session_id=self.active_session_id)
             session.commit()
-            session.refresh(row)
-            self.runtime.decode_count_session += 1
-            self.runtime.last_decode_at = normalized.timestamp_utc
-            self.runtime.last_message = normalized.raw_message
-            self._append_jsonl(normalized.model_dump(mode="json"))
-            return row
         except Exception as exc:
             session.rollback()
             self.runtime.last_error = f"store: {exc}"
@@ -121,9 +123,18 @@ class Ingestor:
             return None
         finally:
             session.close()
+        if use_network_dedupe:
+            self.dedupe.remember(raw)
+        self.runtime.decode_count_session += 1
+        self.runtime.last_decode_at = normalized.timestamp_utc
+        self.runtime.last_message = normalized.raw_message
+        self._archive_optional(self._append_jsonl, normalized.model_dump(mode="json"))
+        return row
 
     def _apply_status(self, message: StatusMessage, now: datetime) -> None:
-        status = self.runtime.receiver_status
+        status = self.runtime.receiver_statuses.setdefault(
+            message.instance_id, ReceiverStatus(instance_id=message.instance_id)
+        )
         status.dial_frequency_hz = message.dial_frequency_hz
         status.mode = message.mode
         status.de_call = message.de_call
@@ -134,6 +145,7 @@ class Ingestor:
         status.transmitting = message.transmitting
         status.instance_id = message.instance_id
         status.updated_at = now
+        self.runtime.receiver_status = status
         if message.de_grid and self.config.receiver_grid is None:
             # Status grid is the operator's locator from WSJT-X, not invented.
             # We do not silently overwrite config; we only cache on runtime status.
@@ -182,6 +194,13 @@ class Ingestor:
         with (path / "udp-events.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
 
+    def _archive_optional(self, operation, payload) -> None:
+        try:
+            operation(payload)
+        except OSError as exc:
+            self.runtime.last_error = f"archive: {exc}"
+            log.warning("optional raw archive failed: %s", exc)
+
     def _append_jsonl(self, payload: dict) -> None:
         if not self.config.paths.jsonl_events:
             return
@@ -192,7 +211,7 @@ class Ingestor:
             handle.write(json.dumps(payload) + "\n")
 
 
-def _decode_to_raw(message: DecodeMessage, status: ReceiverStatus) -> RawDecode:
+def _decode_to_raw(message: DecodeMessage, status: ReceiverStatus | None) -> RawDecode:
     when = message.decode_time_utc or datetime.now(tz=timezone.utc)
     return RawDecode(
         source="udp",
@@ -201,12 +220,12 @@ def _decode_to_raw(message: DecodeMessage, status: ReceiverStatus) -> RawDecode:
         snr_db=float(message.snr),
         dt=float(message.dt),
         df=int(message.df),
-        mode=message.mode or "FT8",
+        mode="FT8" if message.mode == "~" else message.mode or "FT8",
         raw_message=message.message,
         low_confidence=message.low_confidence,
         off_air=message.off_air,
         is_new=message.is_new,
-        dial_frequency_hz=status.dial_frequency_hz,
+        dial_frequency_hz=status.dial_frequency_hz if status is not None else None,
         raw_payload=message.raw,
     )
 

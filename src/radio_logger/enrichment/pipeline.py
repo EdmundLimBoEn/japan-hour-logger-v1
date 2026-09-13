@@ -110,13 +110,10 @@ class Enricher:
     def _resolve_grid(self, callsign: str | None, message_grid: str | None) -> tuple[str | None, GridSource]:
         if message_grid and is_grid(message_grid):
             grid = normalize_grid(message_grid)
-            if callsign:
-                self.stations.remember_grid(callsign, grid, "message")
             return grid, "message"
         cached = self.stations.get(callsign) if callsign else None
         if cached and cached.grid:
-            source: GridSource = cached.grid_source if cached.grid_source in {"message", "cache", "external"} else "cache"
-            return cached.grid, source
+            return cached.grid, "cache"
         return None, "none"
 
 

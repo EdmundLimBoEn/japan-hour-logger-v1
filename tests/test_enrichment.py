@@ -59,7 +59,7 @@ def test_grid_comes_from_cache_not_fabricated(enricher: Enricher):
     enricher.enrich(first)
     obs = enricher.enrich(second)
     assert obs.tx_grid == "PM95"
-    assert obs.grid_source == "message"
+    assert obs.grid_source == "cache"
 
 
 def test_no_grid_without_message_or_cache():

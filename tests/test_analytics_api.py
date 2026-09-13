@@ -45,7 +45,12 @@ def test_japan_hour_relative_and_absolute(ingestor, session_factory):
 
 
 def test_api_and_dashboard(ingestor, session_factory, config, runtime):
-    ingestor.ingest_raw(_raw(datetime(2026, 9, 11, 0, 0, tzinfo=timezone.utc), "CQ JA1XYZ PM95"), skip_dedupe=True)
+    sample_time = datetime(2026, 9, 11, 0, 0, tzinfo=timezone.utc)
+    bounds = {
+        "since": sample_time.isoformat(),
+        "until": (sample_time + timedelta(days=1)).isoformat(),
+    }
+    ingestor.ingest_raw(_raw(sample_time, "CQ JA1XYZ PM95"), skip_dedupe=True)
     app = create_app(config, session_factory, runtime)
     client = TestClient(app)
     home = client.get("/")
@@ -57,9 +62,9 @@ def test_api_and_dashboard(ingestor, session_factory, config, runtime):
     assert body["db_writable"] is True
     latest = client.get("/api/observations/latest")
     assert latest.json()["items"][0]["tx_callsign"] == "JA1XYZ"
-    summary = client.get("/api/stats/summary")
+    summary = client.get("/api/stats/summary", params=bounds)
     assert summary.json()["japan_decodes"] >= 1
-    jh = client.get("/api/stats/japan-hour?bucket=15")
+    jh = client.get("/api/stats/japan-hour", params={**bounds, "bucket": 15})
     assert jh.status_code == 200
     csv = client.get("/api/export/csv")
     assert csv.status_code == 200

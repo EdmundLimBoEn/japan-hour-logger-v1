@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select
@@ -165,7 +165,9 @@ def japan_hour_buckets(
             **metrics,
         }
         buckets.append(item)
-        if peak is None or item["japan_decodes"] > peak["japan_decodes"]:
+        if item["japan_decodes"] and (
+            peak is None or item["japan_decodes"] > peak["japan_decodes"]
+        ):
             peak = item
 
     totals = summary(session, since=since, until=until)
@@ -251,9 +253,10 @@ def _share(part: int, whole: int) -> float | None:
 
 
 def today_bounds(now: datetime, tz: str) -> tuple[datetime, datetime]:
-    from datetime import timezone
-
     local = to_local(now, tz)
     start_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_local = datetime.combine(
+        start_local.date() + timedelta(days=1), time.min, tzinfo=start_local.tzinfo
+    )
     start_utc = start_local.astimezone(timezone.utc)
-    return start_utc, start_utc + timedelta(days=1)
+    return start_utc, next_local.astimezone(timezone.utc)

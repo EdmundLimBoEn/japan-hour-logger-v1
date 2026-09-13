@@ -61,9 +61,14 @@ def database_size_bytes(url: str) -> int | None:
 def db_writable(engine: Engine) -> bool:
     try:
         with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
             if engine.url.drivername.startswith("sqlite"):
-                conn.execute(text("PRAGMA quick_check"))
+                transaction = conn.begin()
+                try:
+                    conn.execute(text("UPDATE observations SET id = id WHERE 0"))
+                finally:
+                    transaction.rollback()
+            else:
+                conn.execute(text("SELECT 1"))
         return True
     except Exception:
         return False

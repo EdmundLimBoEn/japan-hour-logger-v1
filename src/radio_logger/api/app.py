@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfoNotFoundError
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -23,18 +24,23 @@ from radio_logger.config import AppConfig
 from radio_logger.database.engine import database_size_bytes, db_writable
 from radio_logger.database.models import Observation
 from radio_logger.database.repository import Repository
-from radio_logger.export_csv import observations_to_csv
+from radio_logger.export_csv import iter_observations_csv
 from radio_logger.models import RuntimeState
+from radio_logger.timeutil import as_utc, to_local
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
-def observation_dict(row: Observation) -> dict[str, Any]:
+def observation_dict(row: Observation, receiver_timezone: str = "Asia/Singapore") -> dict[str, Any]:
+    timestamp_utc = as_utc(row.timestamp_utc) if row.timestamp_utc else None
+    timezone_name = row.receiver.timezone if row.receiver else receiver_timezone
     return {
         "id": row.id,
         "receiver_id": row.receiver_id,
-        "timestamp_utc": row.timestamp_utc.isoformat() if row.timestamp_utc else None,
-        "timestamp_local": row.timestamp_local.isoformat() if row.timestamp_local else None,
+        "timestamp_utc": timestamp_utc.isoformat() if timestamp_utc else None,
+        "timestamp_local": (
+            to_local(timestamp_utc, timezone_name).isoformat() if timestamp_utc else None
+        ),
         "dial_frequency_hz": row.dial_frequency_hz,
         "audio_frequency_hz": row.audio_frequency_hz,
         "signal_frequency_hz": row.signal_frequency_hz,
@@ -99,7 +105,9 @@ def create_app(
             last_15 = now - timedelta(minutes=15)
             start_today, end_today = today_bounds(now, config.analytics.display_timezone)
             last_row = repo.latest_observations(limit=1)
-            last_obs = observation_dict(last_row[0]) if last_row else None
+            last_obs = (
+                observation_dict(last_row[0], config.receiver.timezone) if last_row else None
+            )
             last_decode_age = None
             if runtime.last_decode_at:
                 last_decode_age = (now - runtime.last_decode_at).total_seconds()
@@ -112,7 +120,7 @@ def create_app(
             return {
                 "ok": True,
                 "version": __version__,
-                "online": udp_recent or last_decode_age is not None,
+                "online": udp_recent,
                 "udp_bound": runtime.udp_bound,
                 "udp_recently_seen": udp_recent,
                 "udp_age_seconds": udp_age,
@@ -120,10 +128,14 @@ def create_app(
                 "last_decode_at": runtime.last_decode_at.isoformat() if runtime.last_decode_at else None,
                 "last_decode_age_seconds": last_decode_age,
                 "last_decode": last_obs,
-                "decodes_15m": repo.count_since(last_15),
-                "japan_decodes_15m": repo.count_since(last_15, japan_only=True),
-                "decodes_today": repo.count_since(start_today),
-                "japan_decodes_today": repo.count_since(start_today, japan_only=True),
+                "decodes_15m": repo.count_since(last_15, until=now),
+                "japan_decodes_15m": repo.count_since(
+                    last_15, until=now, japan_only=True
+                ),
+                "decodes_today": repo.count_since(start_today, until=end_today),
+                "japan_decodes_today": repo.count_since(
+                    start_today, until=end_today, japan_only=True
+                ),
                 "session_decodes": runtime.decode_count_session,
                 "duplicates_suppressed": runtime.duplicate_suppressed,
                 "db_writable": db_writable(session.get_bind()),
@@ -171,7 +183,7 @@ def create_app(
                 "total": total,
                 "limit": limit,
                 "offset": offset,
-                "items": [observation_dict(r) for r in rows],
+                "items": [observation_dict(r, config.receiver.timezone) for r in rows],
             }
         finally:
             session.close()
@@ -181,7 +193,9 @@ def create_app(
         session = db_session()
         try:
             rows = Repository(session).latest_observations(limit=limit)
-            return {"items": [observation_dict(r) for r in rows]}
+            return {
+                "items": [observation_dict(r, config.receiver.timezone) for r in rows]
+            }
         finally:
             session.close()
 
@@ -233,7 +247,7 @@ def create_app(
                     "dxcc": station.dxcc,
                     "decode_count": station.decode_count,
                 },
-                "items": [observation_dict(r) for r in history],
+                "items": [observation_dict(r, config.receiver.timezone) for r in history],
             }
         finally:
             session.close()
@@ -242,7 +256,7 @@ def create_app(
     def api_summary(since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
         session = db_session()
         try:
-            if since is None:
+            if since is None and until is None:
                 since, until = today_bounds(datetime.now(tz=timezone.utc), config.analytics.display_timezone)
             return summary(session, since=since, until=until)
         finally:
@@ -252,7 +266,7 @@ def create_app(
     def api_countries(since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
         session = db_session()
         try:
-            if since is None:
+            if since is None and until is None:
                 since, until = today_bounds(datetime.now(tz=timezone.utc), config.analytics.display_timezone)
             return {"items": country_mix(session, since=since, until=until)}
         finally:
@@ -262,7 +276,7 @@ def create_app(
     def api_distance(since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
         session = db_session()
         try:
-            if since is None:
+            if since is None and until is None:
                 since, until = today_bounds(datetime.now(tz=timezone.utc), config.analytics.display_timezone)
             return {"items": distance_histogram(session, since=since, until=until)}
         finally:
@@ -272,7 +286,7 @@ def create_app(
     def api_snr(since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
         session = db_session()
         try:
-            if since is None:
+            if since is None and until is None:
                 since, until = today_bounds(datetime.now(tz=timezone.utc), config.analytics.display_timezone)
             return snr_histogram(session, since=since, until=until)
         finally:
@@ -288,7 +302,7 @@ def create_app(
         session = db_session()
         try:
             display_tz = tz or config.analytics.display_timezone
-            if since is None:
+            if since is None and until is None:
                 since, until = today_bounds(datetime.now(tz=timezone.utc), display_tz)
             return japan_hour_buckets(
                 session,
@@ -297,21 +311,23 @@ def create_app(
                 bucket_minutes=bucket,
                 display_timezone=display_tz,
             )
-        except ValueError as exc:
+        except (ValueError, ZoneInfoNotFoundError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:
             session.close()
 
     @app.get("/api/export/csv")
     def api_export_csv(since: datetime | None = None, until: datetime | None = None) -> StreamingResponse:
-        session = db_session()
-        try:
-            rows, _total = Repository(session).list_observations(limit=100_000, offset=0, since=since, until=until)
-            csv_text = observations_to_csv(rows)
-        finally:
-            session.close()
+        def stream_csv():
+            session = db_session()
+            try:
+                rows = Repository(session).iter_observations(since=since, until=until)
+                yield from iter_observations_csv(rows, config.receiver.timezone)
+            finally:
+                session.close()
+
         return StreamingResponse(
-            iter([csv_text]),
+            stream_csv(),
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=observations.csv"},
         )

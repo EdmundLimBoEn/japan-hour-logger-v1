@@ -19,14 +19,26 @@ class NetworkDedupe:
         self._keys: set[str] = set()
 
     def is_duplicate(self, decode: RawDecode, now: float | None = None) -> bool:
+        ts = now if now is not None else time.monotonic()
+        if self.contains(decode, now=ts):
+            return True
+        self.remember(decode, now=ts)
+        return False
+
+    def contains(self, decode: RawDecode, now: float | None = None) -> bool:
+        key = decode.fingerprint()
+        ts = now if now is not None else time.monotonic()
+        self._expire(ts)
+        return key in self._keys
+
+    def remember(self, decode: RawDecode, now: float | None = None) -> None:
         key = decode.fingerprint()
         ts = now if now is not None else time.monotonic()
         self._expire(ts)
         if key in self._keys:
-            return True
+            return
         self._seen.append((ts, key))
         self._keys.add(key)
-        return False
 
     def _expire(self, now: float) -> None:
         cutoff = now - self.window_seconds

@@ -77,15 +77,17 @@ def replay_file(
     preserve_copy: bool = True,
 ) -> int:
     if preserve_copy and path.suffix.lower() in {".txt", ".log"}:
-        preserve_all_txt_copy(path, Path(ingestor.config.paths.raw_dir))
-    decodes = list(_iter_replay(path))
+        try:
+            preserve_all_txt_copy(path, Path(ingestor.config.paths.raw_dir))
+        except OSError as exc:
+            log.warning("could not preserve replay source: %s", exc)
     stored = 0
     prev = None
-    for raw in decodes:
+    for raw in _iter_replay(path):
         if speed > 0 and prev is not None:
             delta = (raw.decode_time_utc - prev.decode_time_utc).total_seconds()
             if delta > 0:
-                time.sleep(min(delta / speed, 5.0))
+                time.sleep(delta / speed)
         if ingestor.ingest_raw(raw) is not None:
             stored += 1
         prev = raw
@@ -93,10 +95,11 @@ def replay_file(
 
 
 def _iter_replay(path: Path):
-    if path.suffix.lower() in {".jsonl", ".json"}:
-        for line in path.read_text(errors="replace").splitlines():
-            parsed = parse_jsonl_line(line)
-            if parsed is not None:
-                yield parsed
-        return
-    yield from iter_all_txt_lines(path.read_text(errors="replace").splitlines())
+    with path.open(errors="replace") as lines:
+        if path.suffix.lower() in {".jsonl", ".json"}:
+            for line in lines:
+                parsed = parse_jsonl_line(line)
+                if parsed is not None:
+                    yield parsed
+            return
+        yield from iter_all_txt_lines(lines)

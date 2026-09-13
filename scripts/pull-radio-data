@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import os
+import shlex
+import sqlite3
+import subprocess
+import tempfile
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+REMOTE_CONFIG = "/etc/japan-hour-logger/receiver.yaml"
+REMOTE_LOGGER = "/opt/japan-hour-logger/venv/bin/radio-logger"
+REMOTE_RAW_DIR = "/var/lib/japan-hour-logger/raw/wsjtx"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Pull a consistent radio logger snapshot and raw logs to this Mac."
+    )
+    parser.add_argument("--remote", default="root@radio-pi.local")
+    parser.add_argument(
+        "--destination",
+        type=Path,
+        default=Path("~/Documents/radio-data/radio-pi"),
+    )
+    return parser.parse_args()
+
+
+def run(command: list[str], *, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            command,
+            check=True,
+            capture_output=capture_output,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise SystemExit(f"required command is unavailable: {command[0]}") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.strip() if exc.stderr else f"exit status {exc.returncode}"
+        raise SystemExit(f"{command[0]} failed: {detail}") from exc
+
+
+def create_remote_backup(remote: str) -> str:
+    backup_command = shlex.join(
+        [
+            "runuser",
+            "-u",
+            "radio-logger",
+            "--",
+            REMOTE_LOGGER,
+            "db-backup",
+            "-c",
+            REMOTE_CONFIG,
+        ]
+    )
+    result = run(["ssh", remote, backup_command], capture_output=True)
+    for line in reversed(result.stdout.splitlines()):
+        if line.startswith("backup "):
+            remote_path = line.removeprefix("backup ").strip()
+            if remote_path.startswith("/"):
+                return remote_path
+    raise SystemExit("remote backup command did not report an absolute backup path")
+
+
+def inspect_snapshot(path: Path) -> tuple[int, str | None, str | None]:
+    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        integrity = [row[0] for row in connection.execute("PRAGMA integrity_check")]
+        if integrity != ["ok"]:
+            raise SystemExit(f"downloaded snapshot failed integrity_check: {integrity}")
+        count, first, last = connection.execute(
+            "SELECT COUNT(*), MIN(timestamp_utc), MAX(timestamp_utc) FROM observations"
+        ).fetchone()
+        return int(count), first, last
+    finally:
+        connection.close()
+
+
+def update_latest(destination: Path, snapshot: Path) -> Path:
+    latest = destination / "latest.db"
+    temporary = destination / f".latest-{uuid.uuid4().hex}"
+    temporary.symlink_to(snapshot.relative_to(destination))
+    os.replace(temporary, latest)
+    return latest
+
+
+def main() -> None:
+    args = parse_args()
+    destination = args.destination.expanduser().resolve()
+    snapshots = destination / "snapshots"
+    raw = destination / "raw"
+    snapshots.mkdir(parents=True, exist_ok=True)
+    raw.mkdir(parents=True, exist_ok=True)
+
+    remote_snapshot = create_remote_backup(args.remote)
+    stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    snapshot = snapshots / f"radio-{stamp}.db"
+    descriptor, partial_name = tempfile.mkstemp(
+        prefix=".radio-download-", suffix=".db", dir=snapshots
+    )
+    os.close(descriptor)
+    partial = Path(partial_name)
+    try:
+        run(["scp", f"{args.remote}:{remote_snapshot}", str(partial)])
+        count, first, last = inspect_snapshot(partial)
+        os.replace(partial, snapshot)
+    finally:
+        partial.unlink(missing_ok=True)
+
+    latest = update_latest(destination, snapshot)
+    run(["rsync", "-rt", "--partial", f"{args.remote}:{REMOTE_RAW_DIR}/", str(raw)])
+
+    print(f"Snapshot: {snapshot}")
+    print(f"Latest: {latest}")
+    print(f"Observations: {count}")
+    print(f"UTC range: {first or 'empty'} to {last or 'empty'}")
+    print(f"Raw logs: {raw}")
+
+
+if __name__ == "__main__":
+    main()

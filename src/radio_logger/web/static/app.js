@@ -158,17 +158,30 @@ async function refreshJapan() {
 async function refreshLatest() {
   const data = await getJson("/api/observations/latest?limit=30");
   const body = document.getElementById("latest");
-  body.innerHTML = data.items
-    .map((r) => {
-      const sgt = r.timestamp_local ? r.timestamp_local.slice(11, 19) : "";
-      const utc = r.timestamp_utc ? r.timestamp_utc.slice(11, 19) : "";
-      return `<tr class="${r.is_japan ? "japan" : ""}">
-        <td>${sgt}</td><td>${utc}</td><td>${r.snr_db ?? ""}</td><td>${r.df ?? ""}</td>
-        <td>${r.tx_callsign || ""}</td><td>${r.tx_grid || ""}</td><td>${r.country || ""}</td>
-        <td>${r.distance_km ?? ""}</td><td>${r.raw_message}</td>
-      </tr>`;
-    })
-    .join("");
+  const rows = data.items.map((r) => {
+    const row = document.createElement("tr");
+    if (r.is_japan) row.className = "japan";
+    const values = [
+      r.timestamp_local ? r.timestamp_local.slice(11, 19) : "",
+      r.timestamp_utc ? r.timestamp_utc.slice(11, 19) : "",
+      r.snr_db,
+      r.df,
+      r.tx_callsign,
+      r.tx_grid,
+      r.country,
+      r.distance_km,
+      r.raw_message,
+    ];
+    row.append(
+      ...values.map((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value ?? "";
+        return cell;
+      }),
+    );
+    return row;
+  });
+  body.replaceChildren(...rows);
 }
 
 async function tickFast() {

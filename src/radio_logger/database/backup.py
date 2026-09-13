@@ -20,10 +20,11 @@ def backup_sqlite(url: str, dest_dir: str | Path) -> Path:
         raise ValueError("Online backup is only implemented for on-disk SQLite")
     dest_root = Path(dest_dir)
     dest_root.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     dest = dest_root / f"radio-{stamp}.db"
-    source = sqlite3.connect(src)
+    source = sqlite3.connect(f"{src.resolve().as_uri()}?mode=ro", uri=True)
     try:
+        dest.touch(exist_ok=False)
         target = sqlite3.connect(dest)
         try:
             source.backup(target)

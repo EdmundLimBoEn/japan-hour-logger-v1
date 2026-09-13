@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Japan Hour logger SQLite backup every day
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 Asia/Singapore
+RandomizedDelaySec=30m
+Persistent=true
+Unit=japan-hour-logger-backup.service
+
+[Install]
+WantedBy=timers.target
