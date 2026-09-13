@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -109,3 +109,15 @@ class AppEvent(Base):
     message: Mapped[str] = mapped_column(Text)
     payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     receiver_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class InputCursor(Base):
+    __tablename__ = "input_cursors"
+
+    receiver_id: Mapped[str] = mapped_column(String(64), ForeignKey("receivers.id"), primary_key=True)
+    source_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    device: Mapped[int] = mapped_column(BigInteger)
+    inode: Mapped[int] = mapped_column(BigInteger)
+    generation: Mapped[str] = mapped_column(String(32))
+    offset: Mapped[int] = mapped_column(BigInteger)
+    anchor: Mapped[str] = mapped_column(Text)

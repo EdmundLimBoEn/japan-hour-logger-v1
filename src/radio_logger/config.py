@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal, get_origin
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,6 +59,18 @@ class UdpConfig(ConfigSection):
     multicast: bool = False
 
 
+class InputConfig(ConfigSection):
+    source: Literal["udp", "all_txt"] = "udp"
+    path: str | None = None
+    poll_seconds: float = Field(default=1.0, ge=0.1, le=60, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def require_file_path(self) -> InputConfig:
+        if self.source == "all_txt" and not self.path:
+            raise ValueError("input.path is required for all_txt input")
+        return self
+
+
 class HttpConfig(ConfigSection):
     host: NonemptyString = "127.0.0.1"
     port: int = Field(default=8080, ge=0, le=65535)
@@ -99,6 +111,7 @@ class AppConfig(BaseSettings):
     )
 
     receiver: ReceiverConfig = Field(default_factory=ReceiverConfig)
+    input: InputConfig = Field(default_factory=InputConfig)
     udp: UdpConfig = Field(default_factory=UdpConfig)
     http: HttpConfig = Field(default_factory=HttpConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
@@ -109,6 +122,9 @@ class AppConfig(BaseSettings):
 
     def resolve_paths(self, root: Path | None = None) -> None:
         root = root or _project_root()
+        if self.input.path:
+            path = Path(self.input.path)
+            self.input.path = str((root / path).resolve() if not path.is_absolute() else path.resolve())
         url = self.database.url
         if url.startswith("sqlite:///") and not url.startswith("sqlite:////"):
             rel = url.removeprefix("sqlite:///")

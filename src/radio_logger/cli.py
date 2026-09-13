@@ -38,7 +38,7 @@ def run(
     udp_port: Optional[int] = typer.Option(None, help="WSJT-X UDP port"),
     no_udp: bool = typer.Option(False, help="Serve API/dashboard without opening UDP"),
 ) -> None:
-    """Start UDP ingest plus the API/dashboard."""
+    """Start the configured decode input plus the API/dashboard."""
     import asyncio
 
     from radio_logger.service import run_server

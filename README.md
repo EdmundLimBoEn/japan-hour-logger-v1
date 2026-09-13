@@ -2,7 +2,7 @@
 
 Receive-only FT8 propagation logger for a school Japan Hour experiment.
 
-WSJT-X decodes arrive over UDP (or ALL.TXT replay), every decode is stored as its own SQLite row, then the logger enriches callsign/country/grid/distance and serves Japan Hour analytics on a local dashboard.
+Decodes arrive over WSJT-X UDP or a live ALL.TXT file. Every decode is stored as its own SQLite row, then the logger enriches callsign/country/grid/distance and serves Japan Hour analytics on a local dashboard. Historical ALL.TXT replay is also available.
 
 This program does not talk to an SDR, does not decode FT8, and does not transmit. It starts at the WSJT-X data-output layer.
 
@@ -214,7 +214,7 @@ alembic upgrade head
 | GET | `/api/export/csv` |
 | GET | `/health` |
 
-Status includes UDP recently seen, last decode, decodes/15m, DB writable/size, uptime, dial/band.
+Status includes the configured input, last decode, decodes/15m, DB writable/size, uptime, dial/band, and UDP activity when UDP is selected.
 
 ## Tests
 
@@ -233,14 +233,14 @@ DXCC prefix data is a bundled AD1C-format `cty.dat` (via the DJ1YFK `dxcc` distr
 
 ## Deploy on radio-pi
 
-This is the optional Linux service layout for a separate collection appliance. For the Windows school computer or a Linux desktop, use [the setup guide](docs/SETUP.md) instead.
+Use [the headless deployment guide](docs/HEADLESS.md) for the Orange Pi or a 64-bit Raspberry Pi with the existing `radio-ft8` receiver. The logger reads `/var/lib/radio-ft8/ALL.TXT`. The receiver remains responsible for the SDR, FT8 decoding, and PSK Reporter uploads.
 
 The production layout keeps the wheel and virtual environment under `/opt/japan-hour-logger`. Configuration lives at `/etc/japan-hour-logger/receiver.yaml`. SQLite data, raw WSJT-X events, exports, and backups live under `/var/lib/japan-hour-logger` and belong to the `radio-logger` service account.
 
-Install `deploy/receiver.yaml` and the units under `deploy/systemd/` as root. Build a virtual environment with Python 3.12 or newer, then install the wheel into that environment. Enable both `japan-hour-logger.service` and `japan-hour-logger-backup.timer`.
+The deployment config selects `input.source: all_txt`. Omit `input` in other installations to retain WSJT-X UDP. The service starts automatically and the backup timer runs daily.
 
-For the first deployment, run `deploy/import-existing-all-txt.sh` before you start or enable the logger service. The script takes an immutable copy of WSJT-X `ALL.TXT`, imports that copy once, starts the live UDP listener, and writes an import marker. It refuses to run when the marker or the production database exists. Run the script just after an FT8 decode cycle. If `ALL.TXT` grows before the HTTP health check passes, the script leaves a `review-required` marker instead of claiming a clean cutover.
+The file follower imports the current log from byte zero on first activation, then saves its position with the observations in SQLite. Do not replay that same file separately. Existing one-shot replay and `deploy/import-existing-all-txt.sh` are for manual history imports and the older UDP deployment.
 
-The logger listens for WSJT-X UDP packets on `127.0.0.1:2237`. It serves the dashboard and API on port 8080 on every network interface. The backup timer uses SQLite's online backup API every day and keeps every backup.
+The headless logger serves the dashboard and API on port 8080 on every network interface. It has read-only access to the receiver log, including replacement files created with mode `0640` during rotation. UDP installations listen for WSJT-X packets on `127.0.0.1:2237`. The backup timer uses SQLite's online backup API and keeps every backup.
 
 The [Windows 11 acceptance checklist](docs/SETUP.md#windows-11-acceptance-checklist) covers the target-machine checks after the automated software tests. The [hardening decision trail](docs/hardening-decisions.tsv) records the failure reproductions and verification.
