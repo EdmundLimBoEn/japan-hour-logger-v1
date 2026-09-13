@@ -62,6 +62,8 @@ The logger unit has `PrivateDevices=true` and read-only access to `/var/lib/radi
 
 Keep `/etc/logrotate.d/radio-ft8` on its rename/create policy with `delaycompress`. The existing policy restarts the decoder and reporter to reopen the new file. The logger drains the previous file and follows the replacement. It can recover the saved inode from an uncompressed archive after a restart.
 
+Live rename rotation uses POSIX filesystem behavior on Linux and macOS. On Windows, stop the follower before renaming its input file, then restart it. The Windows school setup continues to use UDP by default.
+
 Do not switch production to `copytruncate`. Truncation detection protects normal recovery, but bytes lost by a copy/truncate race cannot be recovered by the logger. An outage spanning several rotations or compression of the unfinished archive needs a history recovery review. Keep all archives until that review is complete.
 
 Run a backup and inspect the daily timer:

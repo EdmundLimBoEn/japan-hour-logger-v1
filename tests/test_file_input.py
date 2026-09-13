@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -244,16 +245,19 @@ def test_failed_commit_retries_the_same_bytes(ingestor, tmp_path, session_factor
 def test_rename_rotation_drains_old_inode_then_current(
     ingestor, tmp_path, session_factory, restart
 ):
+    if os.name == "nt" and not restart:
+        pytest.skip("Windows cannot rename a file while the follower has it open")
     path = tmp_path / "ALL.TXT"
     path.write_bytes(line())
     follower = AllTxtFollower(path, ingestor)
     assert follower.poll_once() == 1
     with path.open("ab") as handle:
         handle.write(line(second=30))
+    if restart:
+        follower.close()
     path.rename(tmp_path / "ALL.TXT.1")
     path.write_bytes(line(second=45))
     if restart:
-        follower.close()
         follower = AllTxtFollower(path, ingestor)
     try:
         assert follower.poll_once() == 1
@@ -299,6 +303,7 @@ def test_copytruncate_recovers_unread_retained_suffix(ingestor, tmp_path, sessio
     assert [row.timestamp_utc.second for row in rows(session_factory)] == [15, 30, 45]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Live rename of an open file requires POSIX")
 def test_partial_rotated_line_is_not_joined_to_new_file(ingestor, tmp_path, session_factory):
     path = tmp_path / "ALL.TXT"
     path.write_bytes(line() + b"260913_1130")
@@ -349,6 +354,7 @@ def test_missing_file_recovers_and_oversized_line_is_bounded(ingestor, tmp_path)
         follower.close()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Live rename of an open file requires POSIX")
 def test_oversized_incomplete_rotated_file_does_not_block_replacement(
     ingestor, tmp_path, session_factory
 ):
