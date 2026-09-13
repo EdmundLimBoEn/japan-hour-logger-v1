@@ -114,25 +114,50 @@ def create_app(
             else None
         )
         session = db_session()
+        file_mode = config.input.source == "all_txt"
+        file_input = runtime.file_input
         try:
             repo = Repository(session)
-            last_row = repo.latest_observations(limit=1)
+            last_row = repo.latest_observations(limit=1, receiver_id=config.receiver.id)
             last_obs = (
                 observation_dict(last_row[0], config.receiver.timezone) if last_row else None
             )
+            last_decode_at = runtime.last_decode_at
+            if file_mode and last_decode_at is None and last_row:
+                last_decode_at = as_utc(last_row[0].timestamp_utc)
+            last_decode_age = (now - last_decode_at).total_seconds() if last_decode_at else None
             udp_recent = udp_age is not None and 0 <= udp_age < 60 and not runtime.udp_error
             size = database_size_bytes(config.database.url)
             status = runtime.receiver_status
             writable = db_writable(session.get_bind())
+            dial = status.dial_frequency_hz
+            mode = status.mode
+            if file_mode and last_row:
+                dial = dial if dial is not None else last_row[0].dial_frequency_hz
+                mode = mode or last_row[0].mode
+            online = (
+                file_input.readable and last_decode_age is not None and 0 <= last_decode_age < 120
+                if file_mode else udp_recent
+            )
+            file_ok = (not file_mode) or file_input.readable
             return {
-                "ok": writable and not runtime.storage_error and not runtime.udp_error,
+                "ok": writable and not runtime.storage_error and not runtime.udp_error and file_ok,
                 "version": __version__,
-                "online": udp_recent,
+                "online": online,
+                "input_source": config.input.source,
+                "input_path": config.input.path,
+                "input_readable": file_input.readable if file_mode else None,
+                "input_last_poll_at": file_input.last_poll_at.isoformat() if file_input.last_poll_at else None,
+                "input_offset": file_input.offset if file_mode else None,
+                "input_size": file_input.size if file_mode else None,
+                "input_backlog_bytes": max(0, file_input.size - file_input.offset) if file_mode else None,
+                "input_error": file_input.error if file_mode else None,
+                "input_recovery_warning": file_input.recovery_warning if file_mode else None,
                 "udp_bound": runtime.udp_bound,
                 "udp_recently_seen": udp_recent,
                 "udp_age_seconds": udp_age,
                 "last_heartbeat_at": runtime.last_heartbeat_at.isoformat() if runtime.last_heartbeat_at else None,
-                "last_decode_at": runtime.last_decode_at.isoformat() if runtime.last_decode_at else None,
+                "last_decode_at": last_decode_at.isoformat() if last_decode_at else None,
                 "last_decode_age_seconds": last_decode_age,
                 "last_decode": last_obs,
                 "decodes_15m": repo.count_since(last_15, until=now),
@@ -155,16 +180,16 @@ def create_app(
                 "db_writable": writable,
                 "db_size_bytes": size,
                 "uptime_seconds": (now - runtime.started_at).total_seconds(),
-                "dial_frequency_hz": status.dial_frequency_hz,
-                "band": band_from_hz(status.dial_frequency_hz),
-                "mode": status.mode,
+                "dial_frequency_hz": dial,
+                "band": band_from_hz(dial),
+                "mode": mode,
                 "receiver": {
                     "id": config.receiver.id,
                     "name": config.receiver.name,
                     "locator": config.receiver.locator,
                     "timezone": config.receiver.timezone,
                 },
-                "last_error": runtime.last_error,
+                "last_error": (file_input.error or runtime.last_error) if file_mode else runtime.last_error,
                 "display_timezone": config.analytics.display_timezone,
                 "today_start_utc": start_today.isoformat(),
                 "today_end_utc": end_today.isoformat(),
@@ -174,6 +199,15 @@ def create_app(
                 "ok": False,
                 "version": __version__,
                 "online": False,
+                "input_source": config.input.source,
+                "input_path": config.input.path,
+                "input_readable": file_input.readable if file_mode else None,
+                "input_last_poll_at": file_input.last_poll_at.isoformat() if file_input.last_poll_at else None,
+                "input_offset": file_input.offset if file_mode else None,
+                "input_size": file_input.size if file_mode else None,
+                "input_backlog_bytes": max(0, file_input.size - file_input.offset) if file_mode else None,
+                "input_error": file_input.error if file_mode else None,
+                "input_recovery_warning": file_input.recovery_warning if file_mode else None,
                 "udp_recently_seen": False,
                 "udp_bound": runtime.udp_bound,
                 "udp_age_seconds": udp_age,

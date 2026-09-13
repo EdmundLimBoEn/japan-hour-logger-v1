@@ -64,12 +64,27 @@ async function refreshStatus() {
   if (s.storage_error) issues.push("Storage error: " + s.storage_error);
   if (s.udp_error) issues.push("UDP error: " + s.udp_error);
   if (s.storage_failures || s.dropped_datagrams) issues.push("Some observations were lost this session. Preserve WSJT-X ALL.TXT and check the console before importing missing history.");
+  if (s.input_error) issues.push("Input error: " + s.input_error);
+  if (s.input_recovery_warning) issues.push(s.input_recovery_warning);
   if (s.last_error) issues.push("Last issue: " + s.last_error);
   showNotice("runtime-error", issues.join(" "));
   const led = document.getElementById("led");
-  led.className = "led " + (!s.ok ? "warn" : s.udp_recently_seen ? "ok" : "off");
-  document.getElementById("f-online").textContent = !s.ok ? "ERROR" : s.udp_recently_seen ? "UDP LIVE" : "WAITING FOR WSJT-X";
-  document.getElementById("f-udp").textContent = s.udp_bound || LOGGER_META.udp;
+  const fileInput = s.input_source === "all_txt";
+  const inputReady = fileInput ? s.input_readable : s.udp_recently_seen;
+  const input = document.getElementById("f-udp");
+  input.textContent = fileInput ? "ALL.TXT" : s.udp_bound || LOGGER_META.udp;
+  input.title = fileInput ? s.input_path || "" : "";
+  if (!s.ok) {
+    led.className = "led warn";
+    document.getElementById("f-online").textContent = fileInput && !inputReady ? "FILE ERROR" : "ERROR";
+  } else if (fileInput) {
+    led.className = "led " + (s.online ? "ok" : inputReady || s.last_decode_at ? "warn" : "off");
+    document.getElementById("f-online").textContent =
+      s.input_backlog_bytes > 0 ? "CATCHING UP" : s.online ? "FILE LIVE" : "WAITING FOR DECODES";
+  } else {
+    led.className = "led " + (s.udp_recently_seen ? "ok" : "off");
+    document.getElementById("f-online").textContent = s.udp_recently_seen ? "UDP LIVE" : "WAITING FOR WSJT-X";
+  }
   document.getElementById("f-band").textContent = s.band || "--";
   document.getElementById("f-dial").textContent = fmtHz(s.dial_frequency_hz);
   document.getElementById("f-age").textContent = fmtAge(s.last_decode_age_seconds);

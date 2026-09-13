@@ -3,19 +3,22 @@ from __future__ import annotations
 import json
 import logging
 import time
+from copy import deepcopy
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import copy2
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.exc import OperationalError
 
 from radio_logger.bands import band_from_hz
 from radio_logger.config import AppConfig
-from radio_logger.database.models import Observation
+from radio_logger.database.models import InputCursor, Observation
 from radio_logger.database.repository import Repository
 from radio_logger.enrichment.pipeline import Enricher, enrich_or_passthrough
-from radio_logger.models import RawDecode, ReceiverStatus, RuntimeState
+from radio_logger.models import FilePosition, NormalizedDecode, RawDecode, ReceiverStatus, RuntimeState
 from radio_logger.wsjtx.dedupe import NetworkDedupe
 from radio_logger.wsjtx.protocol import (
     ClearMessage,
@@ -188,6 +191,74 @@ class Ingestor:
         self.runtime.last_message = normalized.raw_message
         self._archive_optional(self._append_jsonl, normalized.model_dump(mode="json"))
         return row
+
+    def file_position(self, source_path: str) -> FilePosition | None:
+        with self.session_factory() as session:
+            row = session.get(InputCursor, (self.config.receiver.id, source_path))
+            if row is None:
+                return None
+            return FilePosition(**{name: getattr(row, name) for name in FilePosition.__dataclass_fields__})
+
+    def ingest_file_batch(
+        self,
+        source_path: str,
+        expected: FilePosition | None,
+        position: FilePosition,
+        decodes: list[RawDecode],
+    ) -> bool:
+        cache_before = self.enricher.stations
+        self.enricher.stations = deepcopy(cache_before)
+        normalized = [enrich_or_passthrough(self.enricher, raw) for raw in decodes]
+        with self.session_factory() as session:
+            try:
+                if expected is None:
+                    session.add(InputCursor(
+                        receiver_id=self.config.receiver.id,
+                        source_path=source_path,
+                        **asdict(position),
+                    ))
+                    session.flush()
+                else:
+                    result = session.execute(
+                        update(InputCursor)
+                        .where(
+                            InputCursor.receiver_id == self.config.receiver.id,
+                            InputCursor.source_path == source_path,
+                            *[getattr(InputCursor, name) == value for name, value in asdict(expected).items()],
+                        )
+                        .values(**asdict(position))
+                    )
+                    if result.rowcount != 1:
+                        raise RuntimeError("file cursor changed in another consumer")
+                repo = Repository(session)
+                for decoded in normalized:
+                    repo.insert_observation(decoded, session_id=self.active_session_id)
+                session.commit()
+            except Exception as exc:
+                session.rollback()
+                self.enricher.stations = cache_before
+                self.runtime.last_error = f"file store: {exc}"
+                self.runtime.storage_error = str(exc)
+                self.runtime.storage_failures += 1
+                log.exception("failed to commit file input batch")
+                return False
+        self.runtime.storage_error = None
+        for decoded in normalized:
+            self._after_commit(decoded)
+            status = self.runtime.receiver_status
+            status.dial_frequency_hz = decoded.dial_frequency_hz
+            status.mode = decoded.mode
+            status.updated_at = datetime.now(tz=timezone.utc)
+        if self.runtime.last_error and self.runtime.last_error.startswith("file store:"):
+            self.runtime.last_error = None
+        return True
+
+    def _after_commit(self, normalized: NormalizedDecode) -> None:
+        self.runtime.decode_count_session += 1
+        if self.runtime.last_decode_at is None or normalized.timestamp_utc >= self.runtime.last_decode_at:
+            self.runtime.last_decode_at = normalized.timestamp_utc
+            self.runtime.last_message = normalized.raw_message
+        self._archive_optional(self._append_jsonl, normalized.model_dump(mode="json"))
 
     def _apply_status(self, message: StatusMessage, now: datetime) -> None:
         status = self._receiver_status(message.instance_id)

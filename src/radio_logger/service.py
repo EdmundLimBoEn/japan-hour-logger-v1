@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
-from contextlib import contextmanager
 from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -13,9 +13,10 @@ from radio_logger.api.app import create_app
 from radio_logger.config import AppConfig
 from radio_logger.database.engine import create_schema, make_engine, make_session_factory
 from radio_logger.ingest import Ingestor, preserve_all_txt_copy
-from radio_logger.models import RuntimeState
 from radio_logger.lifecycle import logger_lock
+from radio_logger.models import RuntimeState
 from radio_logger.wsjtx.all_txt import iter_all_txt_lines, parse_jsonl_line
+from radio_logger.wsjtx.file_input import AllTxtFollower
 from radio_logger.wsjtx.listener import start_udp_listener
 
 log = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ async def _serve(config: AppConfig, *, listen_udp: bool, host: str | None, port:
     worker = None
     monitor = None
     http_socket = None
+    follower_task = None
     lost = asyncio.Event()
 
     def on_udp(data: bytes, addr: tuple[str, int]) -> None:
@@ -139,12 +141,19 @@ async def _serve(config: AppConfig, *, listen_udp: bool, host: str | None, port:
     ))
     try:
         http_socket = server.config.bind_socket()
-        if listen_udp:
+        if config.input.source == "all_txt":
+            follower = AllTxtFollower(Path(config.input.path), ingestor)
+            follower_task = asyncio.create_task(follower.run(config.input.poll_seconds))
+        elif listen_udp:
             await bind_udp()
             worker = asyncio.create_task(consume())
             monitor = asyncio.create_task(reconnect())
         await server.serve(sockets=[http_socket])
     finally:
+        if follower_task is not None:
+            follower_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await follower_task
         if monitor is not None:
             monitor.cancel()
             await asyncio.gather(monitor, return_exceptions=True)

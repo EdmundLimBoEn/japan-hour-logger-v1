@@ -124,6 +124,26 @@ class ReceiverStatus:
     updated_at: datetime | None = None
 
 
+@dataclass(frozen=True)
+class FilePosition:
+    device: int
+    inode: int
+    generation: str
+    offset: int
+    anchor: str
+
+
+@dataclass
+class FileInputState:
+    path: str | None = None
+    readable: bool = False
+    last_poll_at: datetime | None = None
+    offset: int = 0
+    size: int = 0
+    error: str | None = None
+    recovery_warning: str | None = None
+
+
 @dataclass
 class RuntimeState:
     started_at: datetime
@@ -146,3 +166,4 @@ class RuntimeState:
     receiver_statuses: dict[str, ReceiverStatus] = field(default_factory=dict)
     udp_bound: str | None = None
     last_error: str | None = None
+    file_input: FileInputState = field(default_factory=FileInputState)

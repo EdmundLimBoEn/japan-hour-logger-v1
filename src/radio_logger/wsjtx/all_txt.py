@@ -100,12 +100,20 @@ def _parse_line(line: str, *, default_dial_hz: int | None) -> RawDecode | None:
     freq = data.get("freq")
     dial = _mhz_or_hz_to_hz(freq) if freq else default_dial_hz
     df = int(data["df"])
+    snr = float(data["snr"])
+    dt = float(data["dt"])
+    if not math.isfinite(snr) or not math.isfinite(dt):
+        return None
+    if abs(df) > 2**63 - 1 or dial is not None and not 0 <= dial <= 2**63 - 1:
+        return None
+    if dial is not None and dial + df > 2**63 - 1:
+        return None
     return RawDecode(
         source="all_txt",
         instance_id=None,
         decode_time_utc=when,
-        snr_db=float(data["snr"]),
-        dt=float(data["dt"]),
+        snr_db=snr,
+        dt=dt,
         df=df,
         mode=data.get("mode") or "FT8",
         raw_message=data["msg"].strip(),
