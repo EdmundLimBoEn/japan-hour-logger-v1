@@ -4,6 +4,11 @@ receiver:
   locator: OJ11WH
   timezone: Asia/Singapore
 
+input:
+  source: all_txt
+  path: /var/lib/radio-ft8/ALL.TXT
+  poll_seconds: 1.0
+
 udp:
   host: 127.0.0.1
   port: 2237

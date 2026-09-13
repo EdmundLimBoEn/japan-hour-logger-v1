@@ -1,11 +1,13 @@
 [Unit]
 Description=Japan Hour FT8 logger
-After=network.target wsjtx.service
+After=network.target radio-ft8-decode.service
+RequiresMountsFor=/var/lib/japan-hour-logger /var/lib/radio-ft8
 
 [Service]
 Type=simple
 User=radio-logger
 Group=radio-logger
+SupplementaryGroups=radio-ft8
 WorkingDirectory=/var/lib/japan-hour-logger
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/japan-hour-logger/venv/bin/radio-logger run --config /etc/japan-hour-logger/receiver.yaml
@@ -27,6 +29,7 @@ RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
 ReadWritePaths=/var/lib/japan-hour-logger
+ReadOnlyPaths=/var/lib/radio-ft8
 
 [Install]
 WantedBy=multi-user.target
