@@ -185,3 +185,12 @@ def test_receiver_instance_tracking_is_bounded(ingestor, runtime):
         ingestor.handle_datagram(packet, ("127.0.0.1", number))
     assert len(runtime.receiver_statuses) <= 64
     assert len(ingestor._sender_addresses) <= 64
+
+
+def test_late_status_does_not_turn_a_retransmission_into_another_observation(ingestor, runtime):
+    packet = encode_decode("CQ JA1XYZ PM95")
+    assert ingestor.handle_datagram(packet, received_monotonic=1.0) is not None
+    ingestor.handle_datagram(encode_status(), received_monotonic=1.1)
+    assert ingestor.handle_datagram(packet, received_monotonic=1.2) is None
+    assert runtime.decode_count_session == 1
+    assert runtime.duplicate_suppressed == 1

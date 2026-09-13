@@ -26,19 +26,24 @@ class NetworkDedupe:
         return False
 
     def contains(self, decode: RawDecode, now: float | None = None) -> bool:
-        key = decode.fingerprint()
+        key = self._key(decode)
         ts = now if now is not None else time.monotonic()
         self._expire(ts)
         return key in self._keys
 
     def remember(self, decode: RawDecode, now: float | None = None) -> None:
-        key = decode.fingerprint()
+        key = self._key(decode)
         ts = now if now is not None else time.monotonic()
         self._expire(ts)
         if key in self._keys:
             return
         self._seen.append((ts, key))
         self._keys.add(key)
+
+    @staticmethod
+    def _key(decode: RawDecode) -> str:
+        # Dial frequency arrives in Status packets, not in Decode retransmissions.
+        return decode.model_copy(update={"dial_frequency_hz": None}).fingerprint()
 
     def _expire(self, now: float) -> None:
         cutoff = now - self.window_seconds
