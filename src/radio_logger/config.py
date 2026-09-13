@@ -4,10 +4,11 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, get_origin
+from typing import Annotated, Any, Literal, get_origin
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,56 +20,82 @@ def _project_root() -> Path:
     return Path.cwd()
 
 
-class ReceiverConfig(BaseModel):
-    id: str = "school-9v"
-    name: str = "Japan Hour Receiver"
+def _timezone(value: str) -> str:
+    try:
+        ZoneInfo(value)
+    except (ValueError, ZoneInfoNotFoundError) as exc:
+        raise ValueError(f"Unknown timezone: {value}") from exc
+    return value
+
+
+TimezoneName = Annotated[str, AfterValidator(_timezone)]
+NonemptyString = Annotated[str, Field(min_length=1)]
+
+
+class ConfigSection(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class ReceiverConfig(ConfigSection):
+    id: NonemptyString = "school-9v"
+    name: NonemptyString = "Japan Hour Receiver"
     locator: str = "TODO"
-    timezone: str = "Asia/Singapore"
+    timezone: TimezoneName = "Asia/Singapore"
+
+    @field_validator("locator")
+    @classmethod
+    def valid_locator(cls, value: str) -> str:
+        from radio_logger.enrichment.maidenhead import is_grid
+
+        value = value.upper()
+        if value not in {"", "TODO"} and not is_grid(value):
+            raise ValueError("Receiver locator must be a Maidenhead grid or TODO")
+        return value
 
 
-class UdpConfig(BaseModel):
-    host: str = "127.0.0.1"
-    port: int = 2237
+class UdpConfig(ConfigSection):
+    host: NonemptyString = "127.0.0.1"
+    port: int = Field(default=2237, ge=0, le=65535)
     multicast: bool = False
 
 
-class HttpConfig(BaseModel):
-    host: str = "127.0.0.1"
-    port: int = 8080
+class HttpConfig(ConfigSection):
+    host: NonemptyString = "127.0.0.1"
+    port: int = Field(default=8080, ge=0, le=65535)
 
 
-class DatabaseConfig(BaseModel):
-    url: str = "sqlite:///data/radio.db"
+class DatabaseConfig(ConfigSection):
+    url: NonemptyString = "sqlite:///data/radio.db"
 
 
-class PathsConfig(BaseModel):
-    data_dir: str = "data"
-    raw_dir: str = "data/raw/wsjtx"
-    exports_dir: str = "data/exports"
-    backups_dir: str = "data/backups"
+class PathsConfig(ConfigSection):
+    data_dir: NonemptyString = "data"
+    raw_dir: NonemptyString = "data/raw/wsjtx"
+    exports_dir: NonemptyString = "data/exports"
+    backups_dir: NonemptyString = "data/backups"
     jsonl_events: bool = True
 
 
-class DedupeConfig(BaseModel):
-    window_seconds: float = 2.0
+class DedupeConfig(ConfigSection):
+    window_seconds: float = Field(default=2.0, ge=0, le=60, allow_inf_nan=False)
 
 
-class JapanConfig(BaseModel):
+class JapanConfig(ConfigSection):
     dxcc_entities: list[str] = Field(
         default_factory=lambda: ["Japan", "Ogasawara", "Minami Torishima"]
     )
 
 
-class AnalyticsConfig(BaseModel):
-    default_bucket_minutes: int = 15
-    display_timezone: str = "Asia/Singapore"
+class AnalyticsConfig(ConfigSection):
+    default_bucket_minutes: Literal[5, 15, 30, 60] = 15
+    display_timezone: TimezoneName = "Asia/Singapore"
 
 
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="RADIO_LOGGER_",
         env_nested_delimiter="__",
-        extra="ignore",
+        extra="forbid",
     )
 
     receiver: ReceiverConfig = Field(default_factory=ReceiverConfig)
@@ -108,7 +135,9 @@ class AppConfig(BaseSettings):
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    data = yaml.safe_load(path.read_text()) or {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
+    if data is None:
+        data = {}
     if not isinstance(data, dict):
         raise ValueError(f"Config file {path} must contain a mapping")
     return data
@@ -137,6 +166,8 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     path = Path(selected_path) if selected_path else root / "config" / "receiver.yaml"
     if not path.is_absolute():
         path = (root / path).resolve() if not path.exists() else path.resolve()
+    if selected_path and not path.is_file():
+        raise FileNotFoundError(f"Configuration file does not exist: {path}")
     data = _load_yaml(path)
     for section, values in _environment_overrides().items():
         existing = data.get(section)

@@ -53,4 +53,5 @@ def signal_frequency_hz(dial_hz: int | None, audio_hz: int | None) -> int | None
         return None
     if audio_hz is None:
         return int(dial_hz)
-    return int(dial_hz) + int(audio_hz)
+    signal = int(dial_hz) + int(audio_hz)
+    return signal if 0 <= signal <= 2**63 - 1 else None

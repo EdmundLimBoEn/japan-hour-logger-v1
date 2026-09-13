@@ -72,10 +72,10 @@ The remaining examples use `radio-logger`. Without activating the virtual enviro
 
 In WSJT-X: **File → Settings → Reporting**.
 
-1. Set **UDP Server** to `127.0.0.1`.
+1. Set the primary **UDP Server** to `127.0.0.1`. Improved Plus's secondary server does not send received decodes.
 2. Set **UDP Server port number** to `2237`.
 3. Leave **Accept UDP requests** disabled. That option allows external programs to send control commands to WSJT-X. WSJT-X sends decode reports with the option disabled.
-4. Leave the logger running before or after WSJT-X. The logger consumes Heartbeat, Status, Decode, Clear, and Close packets. Decode packets become observations.
+4. Leave the logger running before or after WSJT-X. The logger consumes Heartbeat, Status, Decode, Clear, and Close packets. New on-air Decode packets become observations. UDP replays and WAV playback are excluded. Disable receive filters in Improved Plus to capture all received decodes.
 
 Multicast is optional in `config/receiver.yaml` (`udp.multicast: true` and a multicast group as `host`). Default is unicast localhost.
 
@@ -242,3 +242,5 @@ Install `deploy/receiver.yaml` and the units under `deploy/systemd/` as root. Bu
 For the first deployment, run `deploy/import-existing-all-txt.sh` before you start or enable the logger service. The script takes an immutable copy of WSJT-X `ALL.TXT`, imports that copy once, starts the live UDP listener, and writes an import marker. It refuses to run when the marker or the production database exists. Run the script just after an FT8 decode cycle. If `ALL.TXT` grows before the HTTP health check passes, the script leaves a `review-required` marker instead of claiming a clean cutover.
 
 The logger listens for WSJT-X UDP packets on `127.0.0.1:2237`. It serves the dashboard and API on port 8080 on every network interface. The backup timer uses SQLite's online backup API every day and keeps every backup.
+
+The [Windows 11 acceptance checklist](docs/SETUP.md#windows-11-acceptance-checklist) covers the target-machine checks after the automated software tests. The [hardening decision trail](docs/hardening-decisions.tsv) records the failure reproductions and verification.

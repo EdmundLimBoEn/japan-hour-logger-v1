@@ -7,23 +7,31 @@ from pathlib import Path
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from radio_logger.database.backup import sqlite_path_from_url
 from radio_logger.database.models import Base
 
 
 def make_engine(url: str, *, echo: bool = False) -> Engine:
     connect_args = {}
+    engine_args = {}
     if url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
-    engine = create_engine(url, echo=echo, future=True, connect_args=connect_args)
+        connect_args["timeout"] = 5.0
+        if sqlite_path_from_url(url) is None:
+            engine_args["poolclass"] = StaticPool
+    engine = create_engine(url, echo=echo, future=True, connect_args=connect_args, **engine_args)
     if url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
         def _sqlite_pragmas(dbapi_connection, _connection_record):  # type: ignore[no-untyped-def]
             cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.close()
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=FULL")
+            finally:
+                cursor.close()
     return engine
 
 
@@ -49,13 +57,16 @@ def session_scope(factory: sessionmaker[Session]) -> Generator[Session, None, No
 
 
 def database_size_bytes(url: str) -> int | None:
-    if not url.startswith("sqlite:///"):
+    file = sqlite_path_from_url(url)
+    if file is None:
         return None
-    path = url.removeprefix("sqlite:///")
-    if path == ":memory:":
-        return None
-    file = Path(path)
-    return file.stat().st_size if file.exists() else 0
+    size = 0
+    for path in (file, Path(f"{file}-wal"), Path(f"{file}-shm")):
+        try:
+            size += path.stat().st_size
+        except FileNotFoundError:
+            pass
+    return size
 
 
 def db_writable(engine: Engine) -> bool:

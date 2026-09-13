@@ -247,6 +247,20 @@ If distance is blank, confirm the receiver locator is real and the transmitting 
 
 If Japan totals are zero while other decodes arrive, keep collecting. Software cannot guarantee Japanese stations are receivable during a particular period.
 
-If the dashboard says **IDLE** or stops saying **UDP LIVE**, inspect new rows as well. The live indicator expires after 30 seconds without any packet. Heartbeats and decodes have different timing.
+If the dashboard says **IDLE** or stops saying **UDP LIVE**, inspect new rows as well. The live indicator expires after 60 seconds without any packet. Heartbeats and decodes have different timing.
 
 If the browser page fails, confirm the terminal is still running and use `http`, not `https`. Open [health](http://127.0.0.1:8080/health). After installation, the dashboard's scripts and charts are served locally and do not need a chart CDN.
+
+## Respond to collection errors
+
+Keep the console visible during collection. The dashboard reports database errors, disconnected HTTP, queued packets, and lost packets or writes. Stale charts show a warning. A valid heartbeat shows that WSJT-X is reachable but does not prove that audio is being decoded. Confirm new rows too.
+
+If **Lost packets / writes** increases, preserve WSJT-X `ALL.TXT` and the logger's raw event files. Check disk space, disk health, write permissions, and other applications locking SQLite. Storage retries are bounded. Queued packets stay in memory until processed, so a forced process exit or power loss can lose packets that have not committed. Normal Ctrl+C drains the queue before closing the database and can take longer on a slow disk.
+
+Do not reimport a whole overlapping history into the experiment. Replaying a file remains an append operation. Inspect the missing time interval in an isolated database, then import only records known to be absent. UDP packets lost before reaching the logger exist only in WSJT-X's independent log, if that log was enabled. The logger excludes UDP replay and WAV-file playback from live observations.
+
+The logger retries an unexpectedly closed UDP socket once per second. A port already occupied at startup produces an error instead of competing for packets. A second collector, history importer, seed command, or simulator cannot write while a live logger holds the database lock. Backup and export remain available during collection.
+
+SQLite uses WAL with FULL synchronization. Backups become final `.db` files only after verification and flush. CSV exports replace their destination only after the complete export succeeds. None of these protects against a failed physical disk, so keep verified backups on another device.
+
+Setup preserves an unusable Python environment as `.venv.broken-*` before rebuilding it. Keep the old environment until the replacement passes **Check Setup.cmd**. Always stop the logger before updating, especially when upgrading a release that predates the database lock.

@@ -195,39 +195,73 @@ def verify(directory: Path) -> None:
                 raise RuntimeError("A second collector can steal the same unicast UDP port.")
         print("PASS: real UDP input, repeated station retention, duplicate suppression, enrichment")
 
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.sendto(b"invalid WSJT-X packet", destination)
+            sender.sendto(status_packet(), destination)
+            for index in range(200):
+                packet = decode_packet((millis + (index + 2) * 15_000) % 86_400_000)
+                sender.sendto(packet, destination)
+                sender.sendto(packet, destination)
+        expected_count = 202
+        wait_for(lambda: get_json(base + "/api/observations")["total"] == expected_count,
+                 process, seconds=45)
+        wait_for(lambda: get_json(base + "/api/status")["duplicates_suppressed"] == 201,
+                 process)
+        status = get_json(base + "/api/status")
+        require(status["parse_errors"] == 1 and status["dropped_datagrams"] == 0
+                and status["db_writable"],
+                "Malformed input or a duplicate burst damaged UDP collection.")
+        print("PASS: malformed UDP recovery and a burst of 200 unique decodes plus 200 duplicates")
+
+        competing = json.loads(config.read_text(encoding="utf-8"))
+        competing["http"]["port"] = available_port(socket.SOCK_STREAM)
+        competing["udp"]["port"] = available_port(socket.SOCK_DGRAM)
+        second_config = directory / "second-receiver.yaml"
+        second_config.write_text(json.dumps(competing), encoding="utf-8")
+        second = subprocess.run(
+            [sys.executable, "-m", "radio_logger", "run", "--config", str(second_config)],
+            cwd=directory, env=environment, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15,
+        )
+        require(second.returncode != 0 and "already in use" in second.stdout + second.stderr,
+                "Another logger was allowed to collect into the same database.")
+        require(process.poll() is None and get_json(base + "/api/observations")["total"] == expected_count,
+                "Rejecting the second logger interrupted the original collector.")
+        print("PASS: a second process cannot collect into the same database using different ports")
+
         query = urlencode({"since": (now - timedelta(days=1)).isoformat(),
                            "until": (now + timedelta(days=1)).isoformat()})
-        require(get_json(base + "/api/stats/summary?" + query)["japan_decodes"] == 2,
-                "Japan summary does not include both decodes.")
-        require(get_json(base + "/api/stats/japan-hour?" + query)["totals"]["japan_decodes"] == 2,
+        require(get_json(base + "/api/stats/summary?" + query)["japan_decodes"] == expected_count,
+                "Japan summary does not include all decodes.")
+        require(get_json(base + "/api/stats/japan-hour?" + query)["totals"]["japan_decodes"] == expected_count,
                 "Japan Hour chart data is incorrect.")
         api_csv = list(csv.DictReader(io.StringIO(get_text(base + "/api/export/csv"))))
-        require(len(api_csv) == 2, "HTTP CSV export lost observations.")
+        require(len(api_csv) == expected_count, "HTTP CSV export lost observations.")
         cli = [sys.executable, "-m", "radio_logger"]
         exported = data / "exports" / "check.csv"
         subprocess.run(cli + ["export", "--config", str(config), "--output", str(exported)],
                        cwd=directory, env=environment, check=True, timeout=20)
         with exported.open(encoding="utf-8-sig", newline="") as handle:
-            require(len(list(csv.DictReader(handle))) == 2, "CLI CSV export lost observations.")
+            require(len(list(csv.DictReader(handle))) == expected_count, "CLI CSV export lost observations.")
         subprocess.run(cli + ["db-backup", "--config", str(config)],
                        cwd=directory, env=environment, check=True, timeout=20)
         backups = list((data / "backups").glob("*.db"))
         require(len(backups) == 1, "Online backup did not produce one database.")
-        check_database(backups[0], 2)
+        check_database(backups[0], expected_count)
         require(any((data / "raw").rglob("*.jsonl")), "Raw WSJT-X events were not preserved.")
         print("PASS: Japan Hour analytics, HTTP/CLI CSV, raw events, live SQLite backup")
 
     with running_logger(config, directory, environment, base):
-        require(get_json(base + "/api/observations")["total"] == 2,
+        require(get_json(base + "/api/observations")["total"] == expected_count,
                 "Observations did not survive a logger restart.")
-    check_database(data / "radio.db", 2)
+    check_database(data / "radio.db", expected_count)
     print("PASS: database integrity and observations survive restart")
 
 
 def main() -> int:
     print("Checking the installed software with temporary data. School data is untouched.", flush=True)
     try:
-        with tempfile.TemporaryDirectory(prefix="japan logger check ") as temporary:
+        with tempfile.TemporaryDirectory(prefix="japan logger 日本 & radio! check ") as temporary:
             verify(Path(temporary).resolve())
     except (Exception, KeyboardInterrupt) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)

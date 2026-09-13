@@ -1,5 +1,6 @@
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
+set "PYTHONUTF8=1"
 set "LOGGER_ROOT=%~dp0..\.."
 set "LOGGER_EXIT=1"
 for %%A in (%*) do if /I "%%~A"=="--no-pause" set "RADIO_LOGGER_NO_PAUSE=1"
@@ -12,7 +13,11 @@ set "LOGGER_EXIT=%ERRORLEVEL%"
 goto done
 
 :setup
-if exist ".venv\Scripts\python.exe" goto local_python
+if not exist ".venv\Scripts\python.exe" goto find_python
+".venv\Scripts\python.exe" -c "import sys; sys.exit(sys.version_info < (3, 12))" >nul 2>&1
+if not errorlevel 1 goto local_python
+
+:find_python
 py -3.12 -c "import sys; sys.exit(sys.version_info < (3, 12))" >nul 2>&1
 if not errorlevel 1 goto py_launcher
 py -3 -c "import sys; sys.exit(sys.version_info < (3, 12))" >nul 2>&1

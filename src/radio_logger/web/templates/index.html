@@ -22,6 +22,10 @@
     </div>
   </header>
 
+  <p class="panel" id="connection-error" role="alert" hidden></p>
+  <p class="panel" id="runtime-error" role="alert" hidden></p>
+  <p class="panel" id="chart-error" role="status" hidden></p>
+
   <section class="instruments">
     <article class="panel">
       <h2>Receiver</h2>
@@ -32,6 +36,8 @@
         <div><dt>Dial</dt><dd id="f-dial">--</dd></div>
         <div><dt>Last decode</dt><dd id="f-age">--</dd></div>
         <div><dt>Uptime</dt><dd id="f-uptime">--</dd></div>
+        <div><dt>Queued packets</dt><dd id="f-queue">0</dd></div>
+        <div><dt>Lost packets / writes</dt><dd id="f-loss">0 / 0</dd></div>
       </dl>
     </article>
     <article class="panel">

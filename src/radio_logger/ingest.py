@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import copy2
 
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.exc import OperationalError
 
 from radio_logger.bands import band_from_hz
 from radio_logger.config import AppConfig
@@ -44,6 +46,7 @@ class Ingestor:
         self.enricher = enricher or Enricher(config)
         self.dedupe = dedupe or NetworkDedupe(config.dedupe.window_seconds)
         self.active_session_id: int | None = None
+        self._sender_addresses: dict[str, tuple[str, int]] = {}
         self._ensure_receiver()
 
     def _ensure_receiver(self) -> None:
@@ -63,25 +66,42 @@ class Ingestor:
         finally:
             session.close()
 
-    def handle_datagram(self, data: bytes, addr: tuple[str, int] | None = None) -> Observation | None:
-        self.runtime.last_udp_at = datetime.now(tz=timezone.utc)
+    def handle_datagram(
+        self, data: bytes, addr: tuple[str, int] | None = None,
+        *, received_at: datetime | None = None, received_monotonic: float | None = None,
+    ) -> Observation | None:
+        received_at = received_at or datetime.now(tz=timezone.utc)
         self._archive_optional(self._archive_raw_bytes, data)
         try:
-            message = parse_packet(data)
+            message = parse_packet(data, received_at=received_at)
         except Exception as exc:
+            self.runtime.parse_errors += 1
             self.runtime.last_error = f"udp parse: {exc}"
-            self._event("udp_parse_error", str(exc), level="warning")
+            if self.runtime.parse_errors == 1 or self.runtime.parse_errors % 100 == 0:
+                self._event("udp_parse_error", str(exc), level="warning")
             return None
-        return self.handle_wsjtx_message(message)
+        self.runtime.last_udp_at = received_at
+        self.runtime.udp_error = None
+        if addr is not None and message.instance_id:
+            previous = self._sender_addresses.get(message.instance_id)
+            if previous is not None and previous != addr:
+                self._forget_status(message.instance_id)
+            if message.instance_id not in self._sender_addresses and len(self._sender_addresses) >= 64:
+                self._forget_status(next(iter(self._sender_addresses)))
+            self._sender_addresses[message.instance_id] = addr
+        return self.handle_wsjtx_message(
+            message, received_at=received_at, received_monotonic=received_monotonic,
+        )
 
-    def handle_wsjtx_message(self, message: WsjtxMessage) -> Observation | None:
-        now = datetime.now(tz=timezone.utc)
+    def handle_wsjtx_message(
+        self, message: WsjtxMessage, *, received_at: datetime | None = None,
+        received_monotonic: float | None = None,
+    ) -> Observation | None:
+        now = received_at or datetime.now(tz=timezone.utc)
         if isinstance(message, HeartbeatMessage):
             self.runtime.last_heartbeat_at = now
             if message.instance_id:
-                status = self.runtime.receiver_statuses.setdefault(
-                    message.instance_id, ReceiverStatus(instance_id=message.instance_id)
-                )
+                status = self._receiver_status(message.instance_id)
                 self.runtime.receiver_status = status
             return None
         if isinstance(message, StatusMessage):
@@ -93,20 +113,46 @@ class Ingestor:
             return None
         if isinstance(message, CloseMessage):
             self.runtime.last_close_at = now
+            self._forget_status(message.instance_id)
+            self._sender_addresses.pop(message.instance_id, None)
             self._event("wsjtx_close", f"close from {message.instance_id}")
             return None
         if isinstance(message, DecodeMessage):
+            if not message.is_new or message.off_air:
+                self.runtime.ignored_decodes += 1
+                return None
             status = self.runtime.receiver_statuses.get(message.instance_id)
-            return self.ingest_raw(_decode_to_raw(message, status))
+            if status is not None and status.updated_at is not None:
+                age = (now - status.updated_at).total_seconds()
+                if age < 0 or age > 120:
+                    self._forget_status(message.instance_id)
+                    status = None
+            return self.ingest_raw(_decode_to_raw(message, status), dedupe_now=received_monotonic)
         return None
 
-    def ingest_raw(self, raw: RawDecode, *, skip_dedupe: bool = False) -> Observation | None:
+    def _forget_status(self, instance_id: str) -> None:
+        self.runtime.receiver_statuses.pop(instance_id, None)
+        self._sender_addresses.pop(instance_id, None)
+        if self.runtime.receiver_status.instance_id == instance_id:
+            self.runtime.receiver_status = ReceiverStatus()
+
+    def _receiver_status(self, instance_id: str) -> ReceiverStatus:
+        statuses = self.runtime.receiver_statuses
+        if instance_id not in statuses:
+            if len(statuses) >= 64:
+                self._forget_status(next(iter(statuses)))
+            statuses[instance_id] = ReceiverStatus(instance_id=instance_id)
+        return statuses[instance_id]
+
+    def ingest_raw(
+        self, raw: RawDecode, *, skip_dedupe: bool = False, dedupe_now: float | None = None,
+    ) -> Observation | None:
         if raw.dial_frequency_hz is None and raw.source == "udp" and raw.instance_id:
             status = self.runtime.receiver_statuses.get(raw.instance_id)
             if status is not None:
                 raw.dial_frequency_hz = status.dial_frequency_hz
         use_network_dedupe = raw.source == "udp" and not skip_dedupe
-        if use_network_dedupe and self.dedupe.contains(raw):
+        if use_network_dedupe and self.dedupe.contains(raw, now=dedupe_now):
             self.runtime.duplicate_suppressed += 1
             return None
         normalized = enrich_or_passthrough(self.enricher, raw)
@@ -114,17 +160,29 @@ class Ingestor:
         session.expire_on_commit = False
         try:
             repo = Repository(session)
-            row = repo.insert_observation(normalized, session_id=self.active_session_id)
-            session.commit()
+            for attempt in range(3):
+                try:
+                    row = repo.insert_observation(normalized, session_id=self.active_session_id)
+                    session.commit()
+                    break
+                except OperationalError as exc:
+                    session.rollback()
+                    self.runtime.storage_error = str(exc)
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.1 * (attempt + 1))
         except Exception as exc:
             session.rollback()
             self.runtime.last_error = f"store: {exc}"
+            self.runtime.storage_error = str(exc)
+            self.runtime.storage_failures += 1
             log.exception("failed to store decode")
             return None
         finally:
             session.close()
         if use_network_dedupe:
-            self.dedupe.remember(raw)
+            self.dedupe.remember(raw, now=dedupe_now)
+        self.runtime.storage_error = None
         self.runtime.decode_count_session += 1
         self.runtime.last_decode_at = normalized.timestamp_utc
         self.runtime.last_message = normalized.raw_message
@@ -132,9 +190,7 @@ class Ingestor:
         return row
 
     def _apply_status(self, message: StatusMessage, now: datetime) -> None:
-        status = self.runtime.receiver_statuses.setdefault(
-            message.instance_id, ReceiverStatus(instance_id=message.instance_id)
-        )
+        status = self._receiver_status(message.instance_id)
         status.dial_frequency_hz = message.dial_frequency_hz
         status.mode = message.mode
         status.de_call = message.de_call
@@ -146,10 +202,6 @@ class Ingestor:
         status.instance_id = message.instance_id
         status.updated_at = now
         self.runtime.receiver_status = status
-        if message.de_grid and self.config.receiver_grid is None:
-            # Status grid is the operator's locator from WSJT-X, not invented.
-            # We do not silently overwrite config; we only cache on runtime status.
-            pass
         if message.dial_frequency_hz and self.active_session_id:
             session = self.session_factory()
             try:
@@ -162,8 +214,30 @@ class Ingestor:
                     row.mode = message.mode
                     row.instance_id = message.instance_id
                     session.commit()
+            except Exception as exc:
+                session.rollback()
+                self.runtime.last_error = f"status: {exc}"
+                log.warning("Could not save receiver status: %s", exc)
             finally:
                 session.close()
+
+    def close(self) -> None:
+        if self.active_session_id is None:
+            return
+        from radio_logger.database.models import Session as RxSession
+
+        session = self.session_factory()
+        try:
+            row = session.get(RxSession, self.active_session_id)
+            if row is not None:
+                row.ended_at = datetime.now(tz=timezone.utc)
+                session.commit()
+            self.active_session_id = None
+        except Exception:
+            session.rollback()
+            log.exception("Could not close receiver session")
+        finally:
+            session.close()
 
     def _event(self, event_type: str, message: str, level: str = "info") -> None:
         session = self.session_factory()

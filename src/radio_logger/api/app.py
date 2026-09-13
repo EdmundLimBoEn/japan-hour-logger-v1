@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.exc import SQLAlchemyError
 
 from radio_logger import __version__
 from radio_logger.analytics.japan_hour import (
@@ -21,6 +22,7 @@ from radio_logger.analytics.japan_hour import (
     today_bounds,
 )
 from radio_logger.config import AppConfig
+from radio_logger.bands import band_from_hz
 from radio_logger.database.engine import database_size_bytes, db_writable
 from radio_logger.database.models import Observation
 from radio_logger.database.repository import Repository
@@ -114,11 +116,12 @@ def create_app(
             udp_age = None
             if runtime.last_udp_at:
                 udp_age = (now - runtime.last_udp_at).total_seconds()
-            udp_recent = udp_age is not None and udp_age < 30
+            udp_recent = udp_age is not None and 0 <= udp_age < 60 and not runtime.udp_error
             size = database_size_bytes(config.database.url)
             status = runtime.receiver_status
+            writable = db_writable(session.get_bind())
             return {
-                "ok": True,
+                "ok": writable and not runtime.storage_error and not runtime.udp_error,
                 "version": __version__,
                 "online": udp_recent,
                 "udp_bound": runtime.udp_bound,
@@ -138,11 +141,18 @@ def create_app(
                 ),
                 "session_decodes": runtime.decode_count_session,
                 "duplicates_suppressed": runtime.duplicate_suppressed,
-                "db_writable": db_writable(session.get_bind()),
+                "ignored_decodes": runtime.ignored_decodes,
+                "parse_errors": runtime.parse_errors,
+                "storage_failures": runtime.storage_failures,
+                "storage_error": runtime.storage_error,
+                "udp_error": runtime.udp_error,
+                "queue_depth": runtime.queue_depth,
+                "dropped_datagrams": runtime.dropped_datagrams,
+                "db_writable": writable,
                 "db_size_bytes": size,
                 "uptime_seconds": (now - runtime.started_at).total_seconds(),
                 "dial_frequency_hz": status.dial_frequency_hz,
-                "band": None if status.dial_frequency_hz is None else __import__("radio_logger.bands", fromlist=["band_from_hz"]).band_from_hz(status.dial_frequency_hz),
+                "band": band_from_hz(status.dial_frequency_hz),
                 "mode": status.mode,
                 "receiver": {
                     "id": config.receiver.id,
@@ -154,6 +164,20 @@ def create_app(
                 "display_timezone": config.analytics.display_timezone,
                 "today_start_utc": start_today.isoformat(),
                 "today_end_utc": end_today.isoformat(),
+            }
+        except (OSError, SQLAlchemyError) as exc:
+            return {
+                "ok": False,
+                "version": __version__,
+                "online": False,
+                "udp_recently_seen": False,
+                "udp_bound": runtime.udp_bound,
+                "db_writable": False,
+                "storage_error": str(exc),
+                "last_error": f"Database unavailable: {exc}",
+                "storage_failures": runtime.storage_failures,
+                "dropped_datagrams": runtime.dropped_datagrams,
+                "queue_depth": runtime.queue_depth,
             }
         finally:
             session.close()
@@ -335,7 +359,7 @@ def create_app(
     @app.get("/health")
     def health() -> JSONResponse:
         payload = api_status()
-        code = 200 if payload.get("db_writable") else 503
+        code = 200 if payload.get("ok") else 503
         return JSONResponse(payload, status_code=code)
 
     @app.get("/favicon.ico", response_model=None)

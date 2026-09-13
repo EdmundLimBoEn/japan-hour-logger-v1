@@ -1,3 +1,3 @@
 @echo off
-call "%~dp0deploy\windows\launcher.cmd" check %*
-exit /b %ERRORLEVEL%
+setlocal DisableDelayedExpansion
+"%~dp0deploy\windows\launcher.cmd" check %*

@@ -29,7 +29,7 @@ function tickClocks() {
 }
 
 async function getJson(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: "no-store", signal: globalThis.AbortSignal?.timeout(10000) });
   if (!res.ok) throw new Error(url + " " + res.status);
   return res.json();
 }
@@ -58,14 +58,24 @@ const darkOpts = {
 
 async function refreshStatus() {
   const s = await getJson("/api/status");
+  showNotice("connection-error", "");
+  const issues = [];
+  if (!s.db_writable) issues.push("Database is not writable. Collection needs attention.");
+  if (s.storage_error) issues.push("Storage error: " + s.storage_error);
+  if (s.udp_error) issues.push("UDP error: " + s.udp_error);
+  if (s.storage_failures || s.dropped_datagrams) issues.push("Some observations were lost this session. Preserve WSJT-X ALL.TXT and check the console before importing missing history.");
+  if (s.last_error) issues.push("Last issue: " + s.last_error);
+  showNotice("runtime-error", issues.join(" "));
   const led = document.getElementById("led");
-  led.className = "led " + (s.udp_recently_seen ? "ok" : s.last_decode_at ? "warn" : "off");
-  document.getElementById("f-online").textContent = s.udp_recently_seen ? "UDP LIVE" : s.last_decode_at ? "DATA" : "IDLE";
+  led.className = "led " + (!s.ok ? "warn" : s.udp_recently_seen ? "ok" : "off");
+  document.getElementById("f-online").textContent = !s.ok ? "ERROR" : s.udp_recently_seen ? "UDP LIVE" : "WAITING FOR WSJT-X";
   document.getElementById("f-udp").textContent = s.udp_bound || LOGGER_META.udp;
   document.getElementById("f-band").textContent = s.band || "--";
   document.getElementById("f-dial").textContent = fmtHz(s.dial_frequency_hz);
   document.getElementById("f-age").textContent = fmtAge(s.last_decode_age_seconds);
   document.getElementById("f-uptime").textContent = fmtAge(s.uptime_seconds);
+  document.getElementById("f-queue").textContent = s.queue_depth ?? 0;
+  document.getElementById("f-loss").textContent = (s.dropped_datagrams ?? 0) + " / " + (s.storage_failures ?? 0);
   document.getElementById("f-today").textContent = s.decodes_today;
   document.getElementById("f-today-ja").textContent = s.japan_decodes_today;
   document.getElementById("f-15").textContent = s.decodes_15m + " / JA " + s.japan_decodes_15m;
@@ -184,20 +194,39 @@ async function refreshLatest() {
   body.replaceChildren(...rows);
 }
 
+function showNotice(id, message) {
+  const element = document.getElementById(id);
+  element.textContent = message;
+  element.hidden = !message;
+}
+
+let fastPending = false;
+let slowPending = false;
 async function tickFast() {
   tickClocks();
+  if (fastPending) return;
+  fastPending = true;
   try {
     await refreshStatus();
     await refreshLatest();
   } catch (err) {
     document.getElementById("led").className = "led off";
+    document.getElementById("f-online").textContent = "DISCONNECTED";
+    showNotice("connection-error", "Cannot reach the logger. Displayed values may be old. Check its console. Retrying automatically.");
+  } finally {
+    fastPending = false;
   }
 }
 async function tickSlow() {
+  if (slowPending) return;
+  slowPending = true;
   try {
     await refreshJapan();
+    showNotice("chart-error", "");
   } catch (_err) {
-    /* keep last charts */
+    showNotice("chart-error", "Charts could not refresh. Displayed charts may be old. Retrying automatically.");
+  } finally {
+    slowPending = false;
   }
 }
 

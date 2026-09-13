@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import os
+import tempfile
 from typing import Optional
 
 import typer
@@ -89,11 +91,11 @@ def replay(
     speed: float = typer.Option(0.0, help="Playback speed. 0 = as fast as possible. 1 = original timing."),
 ) -> None:
     """Import/replay WSJT-X ALL.TXT or JSONL into the same NormalizedDecode path as UDP."""
-    from radio_logger.service import build_ingestor, replay_file
+    from radio_logger.service import ingestor_session, replay_file
 
     cfg = _cfg(config)
-    ingestor, _runtime, _factory = build_ingestor(cfg)
-    stored = replay_file(ingestor, path, speed=speed)
+    with ingestor_session(cfg) as ingestor:
+        stored = replay_file(ingestor, path, speed=speed)
     typer.echo(f"stored {stored} observations from {path}")
 
 
@@ -114,22 +116,37 @@ def export_cmd(
 
     cfg = _cfg(config)
     dest = output or Path(cfg.paths.exports_dir) / "observations.csv"
+    database = sqlite_path_from_url(cfg.database.url)
+    if database is not None and dest.resolve() in {
+        database.resolve(), Path(str(database.resolve()) + "-wal"),
+        Path(str(database.resolve()) + "-shm"),
+    }:
+        raise typer.BadParameter("CSV output must not replace the database or its journal files")
+    start, end = _parse_utc(since), _parse_utc(until)
     dest.parent.mkdir(parents=True, exist_ok=True)
     factory = init_database(cfg)
     session = factory()
     total = 0
+    temporary = None
     try:
         rows = Repository(session).iter_observations(
-            since=_parse_utc(since), until=_parse_utc(until)
+            since=start, until=end
         )
-        with dest.open("w", encoding="utf-8", newline="") as handle:
+        fd, temporary = tempfile.mkstemp(prefix=f".{dest.name}.", suffix=".partial", dir=dest.parent)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             for index, chunk in enumerate(
                 iter_observations_csv(rows, cfg.receiver.timezone)
             ):
                 handle.write(chunk)
                 if index:
                     total += 1
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, dest)
+        temporary = None
     finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
         session.close()
     typer.echo(f"wrote {total} rows to {dest}")
 
@@ -222,10 +239,9 @@ def seed(
     """Load sample decodes so the dashboard works without WSJT-X."""
     from importlib import resources
 
-    from radio_logger.service import build_ingestor, replay_file
+    from radio_logger.service import ingestor_session, replay_file
 
     cfg = _cfg(config)
-    ingestor, _runtime, _factory = build_ingestor(cfg)
     if fixture is not None:
         path = fixture
     else:
@@ -234,7 +250,8 @@ def seed(
         if not path.exists():
             bundled = resources.files("radio_logger").joinpath("resources/sample_all.txt")
             path = Path(str(bundled))
-    stored = replay_file(ingestor, path, speed=0.0, preserve_copy=False)
+    with ingestor_session(cfg) as ingestor:
+        stored = replay_file(ingestor, path, speed=0.0, preserve_copy=False)
     typer.echo(f"seeded {stored} observations from {path}")
 
 
@@ -244,16 +261,16 @@ def simulate(
     japan_spike: bool = typer.Option(False, help="Generate a Japan-activity spike for analytics QA"),
     count: int = typer.Option(40, help="Used when --japan-spike is off"),
 ) -> None:
-    from radio_logger.service import build_ingestor
+    from radio_logger.service import ingestor_session
     from radio_logger.simulator import japan_spike_series, simulate_decode
 
     cfg = _cfg(config)
-    ingestor, _runtime, _factory = build_ingestor(cfg)
     series = japan_spike_series() if japan_spike else [simulate_decode() for _ in range(count)]
     stored = 0
-    for raw in series:
-        if ingestor.ingest_raw(raw, skip_dedupe=True):
-            stored += 1
+    with ingestor_session(cfg) as ingestor:
+        for raw in series:
+            if ingestor.ingest_raw(raw, skip_dedupe=True):
+                stored += 1
     typer.echo(f"simulated {stored} observations")
 
 

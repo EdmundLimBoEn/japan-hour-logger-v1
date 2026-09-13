@@ -93,7 +93,16 @@ def iter_observations_csv(
     for row in rows:
         buf.seek(0)
         buf.truncate(0)
-        writer.writerow(_csv_row(row, timezone_name))
+        values = _csv_row(row, timezone_name)
+        writer.writerow({
+            key: "'" + value
+            if isinstance(value, str) and (
+                value.startswith(("\t", "\r", "\n"))
+                or value.lstrip().startswith(("=", "+", "-", "@"))
+            )
+            else value
+            for key, value in values.items()
+        })
         yield buf.getvalue()
 
 

@@ -10,20 +10,20 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ["3.12", "3.13"]
+        python: ["3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: school logger
+        working-directory: school 日本 & radio!
     steps:
       - uses: actions/checkout@v4
         with:
-          path: school logger
+          path: school 日本 & radio!
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: school logger/requirements.txt
+          cache-dependency-path: school 日本 & radio!/requirements.txt
       - name: Install the pinned dependencies and build the package
         run: python -m pip install -r requirements.txt .
       - run: python -m pip check
