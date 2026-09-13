@@ -198,8 +198,8 @@ assert (module.ROOT / 'data/radio.db.logger.lock').is_file()
 """
     result = subprocess.run(
         [sys.executable, "-c", script], cwd=launcher.ROOT,
-        env=dict(os.environ, PYTHONPATH=str(source / "src")),
-        capture_output=True, text=True, timeout=30,
+        env=dict(os.environ, PYTHONPATH=str(source / "src"), PYTHONUTF8="1"),
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
