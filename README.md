@@ -146,7 +146,26 @@ Buckets are 5, 15, 30, or 60 minutes (default 15). Each bucket reports:
 - **`japan_relative_snr` = median Japan SNR − median non-Japan SNR**
 - median/max/min Japan distance
 
-Charts default to SGT. UTC hour-of-day is included in the API payload (`/api/stats/japan-hour`).
+The dashboard shows lifetime decodes, distinct transmitting callsigns, Japan decodes,
+and countries. These totals include all stored observations and survive restarts;
+changing the chart range does not change them.
+
+Charts open on the rolling last 24 hours. Select 48 hours or 7 days for a longer
+view, choose 15-, 30-, or 60-minute intervals, and switch between SGT and UTC.
+The activity chart stacks Japan with other/unknown countries. Separate charts
+show distinct callsigns, median SNR, Japan's share, all 24 clock hours, countries,
+and distance. The period summary and CSV export use the same selected bounds.
+
+Empty intervals remain on the timeline with zero recorded decodes. SNR and share
+remain unknown in those intervals; an empty interval does not prove the receiver
+was running. First and last intervals can be partial. Hour-of-day counts sum
+across the selected period, and per-interval unique callsigns should not be added
+together to calculate distinct callsigns for the whole period.
+
+Receiver status refreshes every 5 seconds, charts every 30 seconds, and lifetime
+totals every minute. Charts and dependencies remain local for offline operation.
+The API defaults for existing stats endpoints still use today's display-timezone
+bounds; the dashboard supplies explicit rolling `since` and `until` bounds.
 
 Japan DXCC entities (config `japan.dxcc_entities`): Japan, Ogasawara, Minami Torishima.
 
@@ -207,6 +226,7 @@ alembic upgrade head
 | GET | `/api/stations` |
 | GET | `/api/stations/{call}/history` |
 | GET | `/api/stats/summary` |
+| GET | `/api/stats/totals` (all stored observations) |
 | GET | `/api/stats/countries` |
 | GET | `/api/stats/distance` |
 | GET | `/api/stats/snr` |

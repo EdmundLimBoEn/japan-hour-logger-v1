@@ -17,6 +17,7 @@ from radio_logger.analytics.japan_hour import (
     country_mix,
     distance_histogram,
     japan_hour_buckets,
+    lifetime_totals,
     snr_histogram,
     summary,
     today_bounds,
@@ -339,6 +340,14 @@ def create_app(
                 },
                 "items": [observation_dict(r, config.receiver.timezone) for r in history],
             }
+        finally:
+            session.close()
+
+    @app.get("/api/stats/totals")
+    def api_totals() -> dict[str, Any]:
+        session = db_session()
+        try:
+            return lifetime_totals(session)
         finally:
             session.close()
 

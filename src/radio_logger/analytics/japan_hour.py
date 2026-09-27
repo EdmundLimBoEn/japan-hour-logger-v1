@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Row, case, func, select
 from sqlalchemy.orm import Session
 
 from radio_logger.database.models import Observation
 from radio_logger.timeutil import as_utc, floor_bucket, to_local, tz_name
 
 JAPAN_RELATIVE_SNR = "median_japan_snr - median_non_japan_snr"
+MAX_PADDED_BUCKETS = 10_000
 
 
 def _median(values: list[float]) -> float | None:
@@ -26,49 +29,121 @@ def _mean(values: list[float]) -> float | None:
     return float(statistics.fmean(values))
 
 
-def summary(session: Session, *, since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
-    stmt = select(Observation)
+def _metric_rows(
+    session: Session, *, since: datetime | None, until: datetime | None
+) -> Iterator[Row[Any]]:
+    stmt = select(
+        Observation.timestamp_utc,
+        Observation.tx_callsign,
+        Observation.country,
+        Observation.is_japan,
+        Observation.snr_db,
+        Observation.distance_km,
+    )
     if since:
         stmt = stmt.where(Observation.timestamp_utc >= as_utc(since))
     if until:
         stmt = stmt.where(Observation.timestamp_utc < as_utc(until))
-    rows = list(session.scalars(stmt))
-    snrs = [r.snr_db for r in rows if r.snr_db is not None]
-    japan = [r for r in rows if r.is_japan]
-    japan_snr = [r.snr_db for r in japan if r.snr_db is not None]
-    non_japan_snr = [r.snr_db for r in rows if not r.is_japan and r.snr_db is not None]
-    japan_dist = [r.distance_km for r in japan if r.distance_km is not None]
-    calls = {r.tx_callsign for r in rows if r.tx_callsign}
-    japan_calls = {r.tx_callsign for r in japan if r.tx_callsign}
-    countries = {r.country for r in rows if r.country}
-    japan_countries = {r.country for r in japan if r.country}
-    median_j = _median(japan_snr)
-    median_nj = _median(non_japan_snr)
-    relative = None if median_j is None or median_nj is None else round(median_j - median_nj, 2)
+    yield from session.execute(stmt.execution_options(yield_per=1000))
+
+
+@dataclass
+class _Metrics:
+    total_decodes: int = 0
+    japan_decodes: int = 0
+    calls: set[str] = field(default_factory=set)
+    japan_calls: set[str] = field(default_factory=set)
+    countries: set[str] = field(default_factory=set)
+    japan_countries: set[str] = field(default_factory=set)
+    snrs: list[float] = field(default_factory=list)
+    japan_snr: list[float] = field(default_factory=list)
+    non_japan_snr: list[float] = field(default_factory=list)
+    japan_dist: list[float] = field(default_factory=list)
+
+    def add(self, row: Row[Any]) -> None:
+        self.total_decodes += 1
+        if row.tx_callsign:
+            self.calls.add(row.tx_callsign)
+        if row.country:
+            self.countries.add(row.country)
+        if row.snr_db is not None:
+            self.snrs.append(row.snr_db)
+            (self.japan_snr if row.is_japan else self.non_japan_snr).append(row.snr_db)
+        if row.is_japan:
+            self.japan_decodes += 1
+            if row.tx_callsign:
+                self.japan_calls.add(row.tx_callsign)
+            if row.country:
+                self.japan_countries.add(row.country)
+            if row.distance_km is not None:
+                self.japan_dist.append(row.distance_km)
+
+    def result(self, *, full: bool = True) -> dict[str, Any]:
+        median_j = _median(self.japan_snr)
+        median_nj = _median(self.non_japan_snr)
+        relative = None if median_j is None or median_nj is None else round(median_j - median_nj, 2)
+        result = {
+            "total_decodes": self.total_decodes,
+            "unique_callsigns": len(self.calls),
+            "unique_countries": len(self.countries),
+            "japan_decodes": self.japan_decodes,
+            "japan_unique_callsigns": len(self.japan_calls),
+            "japan_unique_countries": len(self.japan_countries),
+            "japan_decode_share": _share(self.japan_decodes, self.total_decodes),
+            "japan_unique_station_share": _share(len(self.japan_calls), len(self.calls)),
+            "median_all_snr": _median(self.snrs),
+            "median_japan_snr": median_j,
+            "mean_japan_snr": _mean(self.japan_snr),
+            "min_japan_snr": min(self.japan_snr) if self.japan_snr else None,
+            "max_japan_snr": max(self.japan_snr) if self.japan_snr else None,
+            "median_non_japan_snr": median_nj,
+            "japan_relative_snr": relative,
+            "median_japan_distance_km": _median(self.japan_dist),
+            "max_japan_distance_km": max(self.japan_dist) if self.japan_dist else None,
+            "min_japan_distance_km": min(self.japan_dist) if self.japan_dist else None,
+        }
+        if full:
+            result.update(
+                mean_all_snr=_mean(self.snrs),
+                min_all_snr=min(self.snrs) if self.snrs else None,
+                max_all_snr=max(self.snrs) if self.snrs else None,
+                japan_relative_snr_definition=JAPAN_RELATIVE_SNR,
+                mean_japan_distance_km=_mean(self.japan_dist),
+            )
+        return result
+
+
+def summary(session: Session, *, since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
+    metrics = _Metrics()
+    for row in _metric_rows(session, since=since, until=until):
+        metrics.add(row)
+    return metrics.result()
+
+
+def lifetime_totals(session: Session) -> dict[str, Any]:
+    callsign = func.nullif(Observation.tx_callsign, "")
+    country = func.nullif(Observation.country, "")
+    result = session.execute(
+        select(
+            func.count().label("total_decodes"),
+            func.count(func.distinct(callsign)).label("unique_callsigns"),
+            func.count(func.distinct(country)).label("unique_countries"),
+            func.count(case((Observation.is_japan.is_(True), 1))).label("japan_decodes"),
+            func.count(func.distinct(case((Observation.is_japan.is_(True), callsign)))).label(
+                "japan_unique_callsigns"
+            ),
+            func.min(Observation.timestamp_utc).label("first_decode_at"),
+            func.max(Observation.timestamp_utc).label("last_decode_at"),
+        )
+    ).one()
     return {
-        "total_decodes": len(rows),
-        "unique_callsigns": len(calls),
-        "unique_countries": len(countries),
-        "japan_decodes": len(japan),
-        "japan_unique_callsigns": len(japan_calls),
-        "japan_unique_countries": len(japan_countries),
-        "japan_decode_share": _share(len(japan), len(rows)),
-        "japan_unique_station_share": _share(len(japan_calls), len(calls)),
-        "median_all_snr": _median(snrs),
-        "mean_all_snr": _mean(snrs),
-        "min_all_snr": min(snrs) if snrs else None,
-        "max_all_snr": max(snrs) if snrs else None,
-        "median_japan_snr": median_j,
-        "mean_japan_snr": _mean(japan_snr),
-        "min_japan_snr": min(japan_snr) if japan_snr else None,
-        "max_japan_snr": max(japan_snr) if japan_snr else None,
-        "median_non_japan_snr": median_nj,
-        "japan_relative_snr": relative,
-        "japan_relative_snr_definition": JAPAN_RELATIVE_SNR,
-        "median_japan_distance_km": _median(japan_dist),
-        "max_japan_distance_km": max(japan_dist) if japan_dist else None,
-        "min_japan_distance_km": min(japan_dist) if japan_dist else None,
-        "mean_japan_distance_km": _mean(japan_dist),
+        "total_decodes": result.total_decodes,
+        "unique_callsigns": result.unique_callsigns,
+        "unique_countries": result.unique_countries,
+        "japan_decodes": result.japan_decodes,
+        "japan_unique_callsigns": result.japan_unique_callsigns,
+        "first_decode_at": as_utc(result.first_decode_at).isoformat() if result.first_decode_at else None,
+        "last_decode_at": as_utc(result.last_decode_at).isoformat() if result.last_decode_at else None,
     }
 
 
@@ -141,22 +216,37 @@ def japan_hour_buckets(
 ) -> dict[str, Any]:
     if bucket_minutes not in {5, 15, 30, 60}:
         raise ValueError("bucket_minutes must be 5, 15, 30, or 60")
-    stmt = select(Observation)
-    if since:
-        stmt = stmt.where(Observation.timestamp_utc >= as_utc(since))
-    if until:
-        stmt = stmt.where(Observation.timestamp_utc < as_utc(until))
-    rows = list(session.scalars(stmt.order_by(Observation.timestamp_utc.asc())))
-    grouped: dict[datetime, list[Observation]] = defaultdict(list)
-    for row in rows:
-        grouped[floor_bucket(row.timestamp_utc, bucket_minutes)].append(row)
+    zone = tz_name(display_timezone)
+    since = as_utc(since) if since is not None else None
+    until = as_utc(until) if until is not None else None
+    grouped: dict[datetime, _Metrics] = defaultdict(_Metrics)
+    if since is not None and until is not None:
+        if since >= until:
+            raise ValueError("since must be before until")
+        first_bucket = floor_bucket(since, bucket_minutes)
+        interval = timedelta(minutes=bucket_minutes)
+        bucket_count, remainder = divmod(until - first_bucket, interval)
+        bucket_count += bool(remainder)
+        if bucket_count > MAX_PADDED_BUCKETS:
+            raise ValueError(f"time range exceeds {MAX_PADDED_BUCKETS:,} buckets; shorten the range or increase bucket")
+        for index in range(bucket_count):
+            grouped[first_bucket + index * interval] = _Metrics()
+
+    totals = _Metrics()
+    local_hours = _HourlyCounts()
+    utc_hours = _HourlyCounts()
+    for row in _metric_rows(session, since=since, until=until):
+        timestamp = as_utc(row.timestamp_utc)
+        grouped[floor_bucket(timestamp, bucket_minutes)].add(row)
+        totals.add(row)
+        local_hours.add(row, timestamp.astimezone(zone).hour)
+        utc_hours.add(row, timestamp.hour)
 
     buckets = []
     peak = None
     for start in sorted(grouped):
-        group = grouped[start]
-        metrics = _bucket_metrics(group)
-        local_start = to_local(start, display_timezone)
+        metrics = grouped[start].result(full=False)
+        local_start = start.astimezone(zone)
         item = {
             "bucket_start_utc": start.isoformat(),
             "bucket_start_local": local_start.isoformat(),
@@ -170,80 +260,47 @@ def japan_hour_buckets(
         ):
             peak = item
 
-    totals = summary(session, since=since, until=until)
     return {
+        "since": since.isoformat() if since is not None else None,
+        "until": until.isoformat() if until is not None else None,
         "bucket_minutes": bucket_minutes,
         "display_timezone": display_timezone,
         "japan_relative_snr_definition": JAPAN_RELATIVE_SNR,
-        "totals": totals,
+        "totals": totals.result(),
         "peak_local": peak,
         "buckets": buckets,
-        "time_of_day_local": _time_of_day(rows, display_timezone),
-        "time_of_day_utc": _time_of_day(rows, "UTC"),
+        "time_of_day_local": local_hours.result(),
+        "time_of_day_utc": utc_hours.result(),
     }
 
 
-def _bucket_metrics(rows: list[Observation]) -> dict[str, Any]:
-    japan = [r for r in rows if r.is_japan]
-    calls = {r.tx_callsign for r in rows if r.tx_callsign}
-    japan_calls = {r.tx_callsign for r in japan if r.tx_callsign}
-    countries = {r.country for r in rows if r.country}
-    japan_countries = {r.country for r in japan if r.country}
-    japan_snr = [r.snr_db for r in japan if r.snr_db is not None]
-    all_snr = [r.snr_db for r in rows if r.snr_db is not None]
-    non_japan_snr = [r.snr_db for r in rows if not r.is_japan and r.snr_db is not None]
-    japan_dist = [r.distance_km for r in japan if r.distance_km is not None]
-    median_j = _median(japan_snr)
-    median_nj = _median(non_japan_snr)
-    relative = None if median_j is None or median_nj is None else round(median_j - median_nj, 2)
-    return {
-        "total_decodes": len(rows),
-        "unique_callsigns": len(calls),
-        "unique_countries": len(countries),
-        "japan_decodes": len(japan),
-        "japan_unique_callsigns": len(japan_calls),
-        "japan_unique_countries": len(japan_countries),
-        "japan_decode_share": _share(len(japan), len(rows)),
-        "japan_unique_station_share": _share(len(japan_calls), len(calls)),
-        "median_japan_snr": median_j,
-        "mean_japan_snr": _mean(japan_snr),
-        "max_japan_snr": max(japan_snr) if japan_snr else None,
-        "min_japan_snr": min(japan_snr) if japan_snr else None,
-        "median_all_snr": _median(all_snr),
-        "median_non_japan_snr": median_nj,
-        "japan_relative_snr": relative,
-        "median_japan_distance_km": _median(japan_dist),
-        "max_japan_distance_km": max(japan_dist) if japan_dist else None,
-        "min_japan_distance_km": min(japan_dist) if japan_dist else None,
-    }
+@dataclass
+class _HourlyCounts:
+    decodes: list[int] = field(default_factory=lambda: [0] * 24)
+    japan_decodes: list[int] = field(default_factory=lambda: [0] * 24)
+    callsigns: list[set[str]] = field(default_factory=lambda: [set() for _ in range(24)])
+    japan_callsigns: list[set[str]] = field(default_factory=lambda: [set() for _ in range(24)])
 
-
-def _time_of_day(rows: list[Observation], tz: str) -> list[dict[str, Any]]:
-    hours = defaultdict(lambda: {"decodes": 0, "japan_decodes": 0, "callsigns": set(), "japan_callsigns": set()})
-    zone = tz_name(tz)
-    for row in rows:
-        hour = as_utc(row.timestamp_utc).astimezone(zone).strftime("%H:00")
-        bucket = hours[hour]
-        bucket["decodes"] += 1
+    def add(self, row: Row[Any], hour: int) -> None:
+        self.decodes[hour] += 1
         if row.tx_callsign:
-            bucket["callsigns"].add(row.tx_callsign)
+            self.callsigns[hour].add(row.tx_callsign)
         if row.is_japan:
-            bucket["japan_decodes"] += 1
+            self.japan_decodes[hour] += 1
             if row.tx_callsign:
-                bucket["japan_callsigns"].add(row.tx_callsign)
-    out = []
-    for hour in [f"{h:02d}:00" for h in range(24)]:
-        bucket = hours[hour]
-        out.append(
+                self.japan_callsigns[hour].add(row.tx_callsign)
+
+    def result(self) -> list[dict[str, Any]]:
+        return [
             {
-                "hour": hour,
-                "decodes": bucket["decodes"],
-                "japan_decodes": bucket["japan_decodes"],
-                "unique_callsigns": len(bucket["callsigns"]),
-                "japan_unique_callsigns": len(bucket["japan_callsigns"]),
+                "hour": f"{hour:02d}:00",
+                "decodes": self.decodes[hour],
+                "japan_decodes": self.japan_decodes[hour],
+                "unique_callsigns": len(self.callsigns[hour]),
+                "japan_unique_callsigns": len(self.japan_callsigns[hour]),
             }
-        )
-    return out
+            for hour in range(24)
+        ]
 
 
 def _share(part: int, whole: int) -> float | None:

@@ -13,7 +13,7 @@ The file follower starts at the beginning of the current log the first time it s
 Build the logger wheel on your development computer. Copy the wheel, `deploy/`, and `scripts/verify-headless.py` together to the Pi. From the copied directory, run as root:
 
 ```sh
-deploy/install-headless.sh /absolute/path/to/japan_hour_logger-1.1.0-py3-none-any.whl
+deploy/install-headless.sh /absolute/path/to/japan_hour_logger-1.2.0-py3-none-any.whl
 /opt/japan-hour-logger/venv/bin/python /opt/japan-hour-logger/verify-headless.py
 ```
 
