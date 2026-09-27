@@ -3,7 +3,29 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
+
+
+class FileIdentifier(TypeDecorator[int]):
+    """Preserve wide OS identifiers in existing SQLite BIGINT cursor columns."""
+
+    impl = BigInteger
+    cache_ok = True
+
+    def process_bind_param(self, value: int | None, dialect: Dialect) -> int | str | None:
+        if value is not None and dialect.name == "sqlite" and not -(2**63) <= value < 2**63:
+            # Untagged decimal text would become a REAL and lose identifier bits.
+            return f"id:{value}"
+        return value
+
+    def process_result_value(self, value: int | str | None, dialect: Dialect) -> int | None:
+        if value is None:
+            return None
+        if dialect.name == "sqlite" and isinstance(value, str) and value.startswith("id:"):
+            return int(value[3:])
+        return int(value)
 
 
 class Base(DeclarativeBase):
@@ -116,8 +138,8 @@ class InputCursor(Base):
 
     receiver_id: Mapped[str] = mapped_column(String(64), ForeignKey("receivers.id"), primary_key=True)
     source_path: Mapped[str] = mapped_column(Text, primary_key=True)
-    device: Mapped[int] = mapped_column(BigInteger)
-    inode: Mapped[int] = mapped_column(BigInteger)
+    device: Mapped[int] = mapped_column(FileIdentifier)
+    inode: Mapped[int] = mapped_column(FileIdentifier)
     generation: Mapped[str] = mapped_column(String(32))
     offset: Mapped[int] = mapped_column(BigInteger)
     anchor: Mapped[str] = mapped_column(Text)

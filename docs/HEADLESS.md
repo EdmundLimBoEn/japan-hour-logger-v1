@@ -1,5 +1,9 @@
 # Run the logger with the headless FT8 receiver
 
+This guide covers the separate `radio-pi` receiver. The school computer is a
+different machine; use [school setup](SETUP.md) and [daily operations](OPERATIONS.md)
+for that installation. Confirm the target machine before any remote restart or update.
+
 Open the [radio-pi dashboard](http://192.168.0.12:8080/) on your LAN. The logger consumes the receiver's ALL.TXT file and keeps its observations in SQLite on the SSD.
 
 The receiver remains receive-only at 21.074 MHz on 15m. `/etc/radio-ft8.conf` owns callsign `9V1SWL`, grid `OJ11WH`, and SDR serial `00000001`. The logger does not configure or open the SDR.
