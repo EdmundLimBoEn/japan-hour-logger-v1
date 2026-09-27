@@ -62,6 +62,50 @@ systemctl restart japan-hour-logger
 
 The logger unit has `PrivateDevices=true` and read-only access to `/var/lib/radio-ft8`. `SupplementaryGroups=radio-ft8` lets it read new logs created with mode `0640`. It does not depend on the removed `wsjtx.service`.
 
+## Update the radio-pi receiver supervisor
+
+The optional [`deploy/radio-ft8/receive`](../deploy/radio-ft8/receive) wrapper repairs a receiver failure separate from the logger. The older Bash pipeline, `rtl_fm | python usb_audio.py`, can keep waiting for `rtl_fm` after the audio watchdog exits. The replacement supervises both processes, stops and reaps them when either exits, and exits so the existing `Restart=always` service starts a new pipeline. It uses the same `DEVICE`, `FREQUENCY`, `GAIN`, `PPM`, and `AUDIO_PORT` environment variables and receiver arguments.
+
+The logger installer does not install this wrapper. Copy it to `radio-pi` and run the following from the copied project directory as root on that host only. Check the displayed service definition before continuing: `ExecStart` must invoke `/usr/local/lib/radio-ft8/receive` directly and the existing environment must provide those five variables.
+
+```sh
+set -eu
+test "$(id -u)" -eq 0
+test "$(hostname -s)" = radio-pi
+systemctl cat radio-ft8-sdr.service
+test "$(systemctl show radio-ft8-sdr.service --property=Restart --value)" = always
+case "$(systemctl show radio-ft8-sdr.service --property=ExecStart --value)" in
+    *"path=/usr/local/lib/radio-ft8/receive ;"*) ;;
+    *) echo "Unexpected receiver ExecStart; inspect it before proceeding." >&2; exit 1 ;;
+esac
+
+target=/usr/local/lib/radio-ft8/receive
+test -f "$target"
+test -f deploy/radio-ft8/receive
+install -d -o root -g root -m 0755 /opt/radio-ft8
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+backup=$(mktemp -d "/opt/radio-ft8/before-receive-${stamp}-XXXXXX")
+cp -p "$target" "$backup/receive"
+replacement=$(mktemp /usr/local/lib/radio-ft8/.receive.XXXXXX)
+install -o root -g root -m 0755 deploy/radio-ft8/receive "$replacement"
+mv -T -- "$replacement" "$target"
+echo "Previous receiver wrapper saved in $backup/receive"
+date -u
+systemctl restart radio-ft8-sdr.service
+journalctl -u radio-ft8-sdr.service -n 60 --no-pager
+for unit in radio-ft8-sdr radio-ft8-decode radio-ft8-report japan-hour-logger; do
+    systemctl is-active "$unit"
+done
+tail /var/lib/radio-ft8/ALL.TXT
+/opt/japan-hour-logger/venv/bin/python /opt/japan-hour-logger/verify-headless.py
+```
+
+The replacement is installed with root ownership and mode `0755`, then renamed on the same filesystem. No service definition or receiver setting changes. To roll back, stage the saved `receive` file beside the target with the same ownership and mode, rename it over the target, and restart `radio-ft8-sdr.service`.
+
+Watch for real source decodes timestamped after the restart, then rerun the headless verifier to confirm their ingestion. A successful verifier run against an old source snapshot does not prove reception has resumed. Keep the existing source and database intact; do not inject test decodes into production.
+
+If decodes remain absent, inspect `lsusb -t` and `journalctl -k -b --no-pager` for USB enumeration or transfer failures. The current radio-pi SDR must negotiate `480M` (480 Mbps); a missing device or a `12M` connection indicates a USB path problem that repeated process restarts cannot fix. Investigate the physical connection, hub, and power when the receiver is accessible. This supervisor does not reset USB controllers or change hardware tuning.
+
 ## Keep rotation and backups working
 
 Keep `/etc/logrotate.d/radio-ft8` on its rename/create policy with `delaycompress`. The existing policy restarts the decoder and reporter to reopen the new file. The logger drains the previous file and follows the replacement. It can recover the saved inode from an uncompressed archive after a restart.

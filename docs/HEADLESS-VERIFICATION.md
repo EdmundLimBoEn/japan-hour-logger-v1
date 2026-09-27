@@ -1,5 +1,63 @@
 # Orange Pi deployment receipt
 
+## 27 September 2026: receiver recovery and version 1.2.0
+
+Target: `radio-pi`, Orange Pi 3B ARM64, Armbian Debian Trixie, Python 3.13.
+The school computer is a separate installation. The updated dashboard is at
+<http://100.106.77.117:8080/> over Tailscale or <http://192.168.0.12:8080/> on the LAN.
+
+The last decode before the outage was 26 September at 05:15 UTC / 13:15 SGT.
+Kernel logs recorded a USB disconnect, a hub disable message, and subsequent
+descriptor errors. During recovery the SDR reappeared at 12 Mbps on the OHCI
+controller, but delivered no samples. The current boot began at 07:35 UTC on
+27 September; the device reappeared later, at 08:26 UTC. The operator reported
+reconnecting the device, then suggested a reboot instead. The exact trigger for
+its reappearance and the underlying electrical cause remain unproven.
+
+A port disable/enable did not restore high speed. After confirming that the
+affected USB controller pair served the SDR, with Ethernet and NVMe independent
+of it, restarting that pair restored a 480 Mbps link at 08:29:44 UTC. Real FT8
+decodes resumed at 08:30:15 UTC. No reboot was used during this recovery.
+
+A second failure prevented automatic process recovery: the audio watchdog exited
+after receiving no samples, but the Bash pipeline continued waiting for
+`rtl_fm`. Systemd therefore saw an active service. The new
+[`deploy/radio-ft8/receive`](../deploy/radio-ft8/receive) supervisor watches both
+children, stops and reaps them when either exits, and lets the existing systemd
+restart policy restart the pipeline. Radio settings and both child commands are
+unchanged. It does not reset USB controllers automatically.
+
+| Check | Observed result |
+| --- | --- |
+| Logger release | Version 1.2.0 from commit `dce22a9687685ea03c1c93176c53751ff52e3576`, installed through `deploy/install-headless.sh`; installed dependency check passed. |
+| Wheel SHA-256 | `6d9a3e80b87e66850ed48881ae4970928895f39757b838507b4cd2c2032bf072` |
+| Supervisor SHA-256 | `4a7d998ef2be679d2d8a89807f4db7edfd88c6b0523b84e124bda80ed48136d6` |
+| Database preservation | All 102,547 observations present immediately before deployment retained every column and ID. Ordered row SHA-256 remained `16b28751812f5aaff692da6e9e5d52df0120137821015ffde4559436d7a80db1`; SQLite integrity passed. New observations were allowed to accumulate during verification. |
+| Source catch-up | The final headless verifier matched all 19 current source lines exactly once against 102,564 preserved observations, including JSON, CSV, analytics, and dashboard assets. No synthetic observations were inserted. |
+| Live process recovery | Terminating only audio PID 7311 at 08:35:47 UTC caused supervisor 7308 to exit and systemd to restart it as 7830 at 08:35:52. Both children restarted, the old processes were reaped, `NRestarts=1`, and the link remained 480 Mbps. |
+| Reception after automatic recovery | A real 08:38:45 UTC / 16:38:45 SGT decode, `<...> JA5AQC PM63`, reached SQLite and the API with SNR -16 dB, DT -0.1, and DF 654 Hz. Health reported online, a 31-second decode age, zero backlog, and no input or storage errors. Total callsigns reached 3,212. |
+| Configuration | Existing logger settings, `/etc/radio-ft8.conf`, and the SDR service unit were preserved. All four services remained active; the logger and daily backup timer remained enabled. |
+| Browser | Version 1.2.0 displayed 102,556 lifetime decodes, 3,211 distinct transmitting callsigns, 48,404 Japan decodes, and 134 countries. The 24-hour chart showed the recording gap; the 48-hour control loaded 97 half-hour buckets, including partial endpoints. |
+| Analytics | Lifetime totals matched direct SQL. Rolling 24-hour, 48-hour, and seven-day APIs returned 97, 97, and 169 buckets with partial endpoints, matching aggregate counts and null signal/share values for empty intervals. The live seven-day browser view rendered all 169 points. |
+| Local verification | 317 tests passed, six skipped. Ten supervisor regression tests cover the old pipeline hang, child failures, signal handling, forced cleanup, startup errors, sample forwarding, and unchanged command arguments. Installed-package smoke checks and dependency compatibility passed. |
+
+Deployment artifacts and the pre-update database manifest are retained under
+`/opt/japan-hour-logger/release-1.2.0-dce22a9-JzvACI/japan-hour-logger-1.2.0`.
+The logger rollback snapshot is
+`/opt/japan-hour-logger/before-20260927T083059Z-KLuf9e`; the old receiver wrapper,
+configuration, and SDR unit are saved in
+`/opt/radio-ft8/before-watchdog-20260927T083223Z-uPR1Ir`.
+Online database backups were created before recovery and before installation:
+`radio-20260927T082817.424426Z.db` and `radio-20260927T083117.756232Z.db`, both in
+`/var/lib/japan-hour-logger/backups/`.
+
+This proves software recovery and reception after restoring the USB link. It
+does not establish why the USB hardware disconnected or guarantee recovery from
+another physical USB fault. A readable source can still show WAITING FOR DECODES
+during a quiet band; check sample flow and decoder activity as well.
+
+## 13 September 2026: initial deployment
+
 Verified on 13 September 2026 in Asia/Singapore. Target `radio-pi`, Ethernet `192.168.0.12`, Orange Pi 3B ARM64, Armbian Debian Trixie, Python 3.13.5.
 
 ## Installed artifact

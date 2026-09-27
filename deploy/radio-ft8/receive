@@ -1,0 +1,96 @@
+#!/usr/bin/python3
+"""Restart the receiver pipeline when either side stops."""
+
+import os
+import signal
+import subprocess
+import sys
+import time
+
+
+def log(message):
+    print("radio-ft8 receive: " + message, file=sys.stderr, flush=True)
+
+
+def wait_for_children(children, timeout):
+    deadline = time.monotonic() + timeout
+    while any(child.poll() is None for child in children):
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.05)
+
+
+def stop_children(children):
+    for child in children:
+        if child.poll() is None:
+            try:
+                child.terminate()
+            except ProcessLookupError:
+                pass
+    wait_for_children(children, 3.0)
+    for child in children:
+        if child.poll() is None:
+            log("child pid %s did not stop; sending SIGKILL" % child.pid)
+            try:
+                child.kill()
+            except ProcessLookupError:
+                pass
+    wait_for_children(children, 1.0)
+
+
+def run_pipeline(receiver_command, audio_command):
+    stopped = 0
+    children = []
+
+    def request_stop(signum, _frame):
+        nonlocal stopped
+        stopped = signum
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(signum, request_stop)
+
+    try:
+        receiver = subprocess.Popen(receiver_command, stdout=subprocess.PIPE)
+        children.append(receiver)
+        try:
+            if stopped:
+                return 128 + stopped
+            audio = subprocess.Popen(audio_command, stdin=receiver.stdout)
+            children.append(audio)
+        finally:
+            receiver.stdout.close()
+
+        while not stopped:
+            for name, child in zip(("rtl_fm", "usb_audio"), children):
+                status = child.poll()
+                if status is not None:
+                    log("%s exited with status %s; restarting pipeline" % (name, status))
+                    return 1
+            time.sleep(0.1)
+        return 128 + stopped
+    except OSError as error:
+        log("cannot start pipeline: %s" % error)
+        return 1
+    finally:
+        stop_children(children)
+
+
+def main():
+    try:
+        receiver_command = [
+            "/usr/local/bin/rtl_fm", "-d", os.environ["DEVICE"],
+            "-f", os.environ["FREQUENCY"], "-M", "raw", "-s", "24000",
+            "-F", "9", "-g", os.environ["GAIN"], "-p", os.environ["PPM"], "-",
+        ]
+        audio_command = [
+            "/usr/bin/python3", "/usr/local/lib/radio-ft8/usb_audio.py",
+            "--port", os.environ["AUDIO_PORT"],
+        ]
+    except KeyError as error:
+        log("missing environment variable: %s" % error.args[0])
+        return 1
+    return run_pipeline(receiver_command, audio_command)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
