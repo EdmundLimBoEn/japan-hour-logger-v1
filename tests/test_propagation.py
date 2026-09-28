@@ -115,7 +115,7 @@ def test_propagation_api_uses_cached_feeds_and_local_decodes(ingestor, session_f
             return httpx.Response(200, json={"0": {"R": {"Scale": "0", "Text": "none"}, "S": {"Scale": "0", "Text": "none"}, "G": {"Scale": "0", "Text": "none"}}})
         if url.endswith("solarxml.php"):
             return httpx.Response(200, text=HAMQSL_XML)
-        if "solarsun.php" in url:
+        if "solar101pic.php" in url:
             return httpx.Response(200, content=b"GIF87a", headers={"content-type": "image/gif"})
         return httpx.Response(404)
 
@@ -132,9 +132,10 @@ def test_propagation_api_uses_cached_feeds_and_local_decodes(ingestor, session_f
     assert band["condition"] == "fair"
     assert band["trend"] == "up"
     assert "Japan" in band["regions"]
-    image = client.get("/api/propagation/image/sun")
+    image = client.get("/api/propagation/image/bands")
     assert image.status_code == 200
     assert image.content.startswith(b"GIF87a")
     assert client.get("/api/propagation/image/nope").status_code == 404
+    assert client.get("/api/propagation/image/sun").status_code == 404
     again = client.get("/api/propagation").json()
     assert again["space_weather"]["sfi"] == 167

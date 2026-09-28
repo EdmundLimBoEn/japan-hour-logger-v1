@@ -317,10 +317,8 @@ function renderPropagation(data) {
   if (ham.sunspots) lines.push("Sunspots " + ham.sunspots);
   put("hamqsl-bands", lines.join("  ·  "));
   put("hamqsl-updated", ham.updated ? "HamQSL " + ham.updated.trim() : (ham.error ? "HamQSL reference unavailable" : ""));
-  ["img-sun", "img-muf", "img-bands"].forEach((id) => {
-    const image = document.getElementById(id);
-    image.onerror = () => { image.hidden = true; };
-  });
+  const hamImage = document.getElementById("img-bands");
+  hamImage.onerror = () => { hamImage.hidden = true; };
 }
 
 let fastPending = false;

@@ -72,7 +72,7 @@ button:hover, select:hover { filter: brightness(1.15); }
 .hamqsl-panel { margin-top: 16px; }
 .hamqsl-images { display: flex; flex-wrap: wrap; gap: 12px 16px; margin-top: 12px; align-items: flex-start; }
 .hamqsl-images figure { margin: 0; }
-.hamqsl-images img { width: auto; max-width: 220px; max-height: 84px; height: auto; display: block; border-radius: 4px; background: #071018; }
+.hamqsl-images img { width: auto; max-width: 168px; max-height: 52px; height: auto; display: block; border-radius: 4px; background: #071018; }
 .hamqsl-images figcaption { color: var(--muted); font-size: 11px; margin-top: 4px; }
 .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
 .panel { min-width: 0; padding: 20px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }

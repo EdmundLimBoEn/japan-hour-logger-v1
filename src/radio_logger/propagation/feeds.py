@@ -19,8 +19,6 @@ NOAA_URLS = {
 HAMQSL_XML = "https://www.hamqsl.com/solarxml.php"
 
 HAMQSL_IMAGES = {
-    "sun": "https://www.hamqsl.com/solarsun.php",
-    "muf": "https://www.hamqsl.com/solarmuf.php",
     "bands": "https://www.hamqsl.com/solar101pic.php",
 }
 

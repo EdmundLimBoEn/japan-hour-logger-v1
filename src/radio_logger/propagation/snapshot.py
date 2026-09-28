@@ -50,8 +50,6 @@ def build_snapshot(
             "error": hamqsl.get("error"),
             "fetched_at": hamqsl["fetched_at"].isoformat() if hamqsl.get("fetched_at") else None,
             "images": [
-                {"id": "sun", "title": "Solar disk", "href": "https://www.hamqsl.com/solarsun.php"},
-                {"id": "muf", "title": "Worldwide MUF", "href": "https://www.hamqsl.com/solarmuf.php"},
                 {"id": "bands", "title": "HF band summary", "href": "https://www.hamqsl.com/solar101pic.php"},
             ],
         },
