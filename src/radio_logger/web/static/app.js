@@ -281,50 +281,43 @@ function renderPropagation(data) {
   const heard = data.heard || {};
   const tuned = heard.band || (heard.bands && heard.bands[0] && heard.bands[0].band);
   const dial = heard.dial_hz == null ? "" : (heard.dial_hz / 1e6).toFixed(3) + " MHz";
-  put("heard-hint", tuned
-    ? "One frequency: " + tuned + (dial ? " · " + dial : "") + ". Last 15 minutes against the 15 before."
-    : "This receiver listens on one frequency. No decodes yet.");
-  const body = document.getElementById("band-rows");
-  const rows = (heard.bands || []).map((band) => {
-    const row = document.createElement("tr");
-    const cells = [
-      band.band,
-      (band.condition || "quiet") + " " + (band.trend === "up" ? "↑" : band.trend === "down" ? "↓" : "→"),
-      count(band.unique_calls_15m),
-      band.median_snr == null ? "--" : n(band.median_snr, 0),
-      (band.regions || []).join(", ") || "--",
-    ];
-    cells.forEach((value, index) => {
-      const cell = document.createElement("td");
-      cell.textContent = value;
-      if (index === 1) cell.className = "cond-" + (band.condition || "quiet");
-      row.append(cell);
-    });
-    return row;
-  });
-  if (!rows.length) {
-    const row = document.createElement("tr");
-    const cell = document.createElement("td");
-    cell.colSpan = 5;
-    cell.textContent = "No recent HF decodes.";
-    row.append(cell);
-    rows.push(row);
+  const band = (heard.bands || [])[0];
+  const condition = document.getElementById("heard-condition");
+  if (!band) {
+    condition.textContent = "--";
+    condition.className = "heard-condition";
+    put("heard-detail", "");
+  } else {
+    const arrow = band.trend === "up" ? "↑" : band.trend === "down" ? "↓" : "→";
+    condition.textContent = (band.condition || "quiet") + " " + arrow;
+    condition.className = "heard-condition cond-" + (band.condition || "quiet");
+    const where = (band.regions || []).join(", ");
+    put("heard-detail", [
+      count(band.unique_calls_15m) + " calls",
+      band.median_snr == null ? null : n(band.median_snr, 0) + " dB",
+      where || null,
+    ].filter(Boolean).join(" · "));
   }
-  body.replaceChildren(...rows);
+  put("heard-hint", tuned
+    ? tuned + (dial ? " · " + dial : "") + " · last 15 minutes against the 15 before"
+    : "This receiver listens on one frequency. No decodes yet.");
   const ham = data.hamqsl || {};
-  const groups = { day: [], night: [] };
-  (ham.bands || []).forEach((band) => {
-    const bucket = groups[band.time] || groups.day;
-    if (band.name && band.rating) bucket.push(band.name + " " + band.rating);
+  const groups = { day: {}, night: {} };
+  const names = [];
+  (ham.bands || []).forEach((item) => {
+    if (!item.name || !item.rating) return;
+    const slot = item.time === "night" ? groups.night : groups.day;
+    if (!names.includes(item.name)) names.push(item.name);
+    slot[item.name] = item.rating;
   });
-  const lines = [];
-  if (groups.day.length) lines.push("Day " + groups.day.join(" · "));
-  if (groups.night.length) lines.push("Night " + groups.night.join(" · "));
-  if (ham.sunspots) lines.push("Sunspots " + ham.sunspots);
-  put("hamqsl-bands", lines.join("  ·  "));
-  put("hamqsl-updated", ham.updated ? "HamQSL " + ham.updated.trim() : (ham.error ? "HamQSL reference unavailable" : ""));
-  const hamImage = document.getElementById("img-bands");
-  hamImage.onerror = () => { hamImage.hidden = true; };
+  const ratings = names.map((name) => {
+    const day = groups.day[name];
+    const night = groups.night[name];
+    return name + (day ? " day " + day : "") + (night ? " night " + night : "");
+  });
+  if (ham.sunspots) ratings.push("Sunspots " + ham.sunspots);
+  document.getElementById("hamqsl-bands").textContent = ratings.join("   ");
+  put("hamqsl-updated", ham.updated ? ham.updated.trim() : (ham.error ? "Unavailable" : ""));
 }
 
 let fastPending = false;

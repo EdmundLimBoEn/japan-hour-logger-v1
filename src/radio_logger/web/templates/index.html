@@ -79,23 +79,19 @@
         </article>
         <article class="panel band-panel">
           <h3>Heard here</h3>
+          <p class="heard-condition" id="heard-condition">--</p>
           <p class="hint" id="heard-hint">This receiver listens on one frequency.</p>
-          <div class="table-scroll">
-            <table>
-              <thead><tr><th>Band</th><th>Here</th><th>Calls</th><th>SNR</th><th>Where</th></tr></thead>
-              <tbody id="band-rows"></tbody>
-            </table>
-          </div>
-        </article>
-        <article class="panel hamqsl-panel">
-          <h3>HamQSL</h3>
-          <p class="hint">Global reference, not this station. <span id="hamqsl-updated"></span></p>
-          <div class="hamqsl-images">
-            <img id="img-bands" alt="HamQSL HF band summary" src="/api/propagation/image/bands">
-          </div>
-          <p class="hint" id="hamqsl-bands"></p>
+          <p class="hint" id="heard-detail"></p>
         </article>
       </div>
+      <article class="panel hamqsl-strip">
+        <div class="panel-heading">
+          <h3>HamQSL</h3>
+          <p class="hint" id="hamqsl-updated"></p>
+        </div>
+        <p class="hint">Global reference, not this station.</p>
+        <div id="hamqsl-bands" class="hamqsl-ratings"></div>
+      </article>
     </section>
 
     <section aria-labelledby="analysis-title" id="analysis">

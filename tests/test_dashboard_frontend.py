@@ -403,10 +403,11 @@ async function main() {
   assert.match(element('solar-detail').textContent, /OJ11/);
   assert.equal(element('prop-alert').hidden, false);
   assert.match(element('prop-alert').textContent, /R3/);
-  assert.equal(element('band-rows').children[0].children[1].textContent, 'excellent ↑');
-  assert.equal(element('band-rows').children[0].children[1].className, 'cond-excellent');
-  assert.match(element('hamqsl-bands').textContent, /Day 17m-15m Fair/);
-  assert.match(element('hamqsl-bands').textContent, /Night 80m-40m Good/);
+  assert.equal(element('heard-condition').textContent, 'excellent ↑');
+  assert.equal(element('heard-condition').className, 'heard-condition cond-excellent');
+  assert.match(element('heard-detail').textContent, /47 calls/);
+  assert.match(element('hamqsl-bands').textContent, /17m-15m day Fair/);
+  assert.match(element('hamqsl-bands').textContent, /80m-40m night Good/);
   context.fetch = async () => { throw new Error('offline'); };
   await context.refreshPropagation();
   assert.equal(element('wx-sfi').textContent, '167');
