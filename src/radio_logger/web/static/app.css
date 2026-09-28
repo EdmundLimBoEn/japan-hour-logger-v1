@@ -69,6 +69,13 @@ button:hover, select:hover { filter: brightness(1.15); }
 #feed-detail .hamqsl-photo { grid-column: 1 / -1; }
 #feed-detail .hamqsl-photo img { width: 410px; max-width: 100%; height: auto; display: block; margin-top: 12px; }
 .prop-layout { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 14px; align-items: start; }
+.explain { margin-top: 14px; }
+.explain summary { width: fit-content; cursor: pointer; color: var(--muted); font-size: 12px; }
+.explain summary:hover { color: var(--text); }
+.explain dl { display: block; margin: 14px 0 0; }
+.explain dl > div { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 12px; margin-top: 10px; }
+.explain dt { color: var(--text); font-size: 12px; }
+.explain dd { margin: 0; color: var(--muted); font-size: 13px; }
 .wx { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 14px; }
 .solar-state { margin-top: 16px; font: 500 28px/1.3 var(--mono); color: var(--amber); letter-spacing: -.03em; }
 .heard-condition { margin-top: 12px; font: 500 28px/1.2 var(--mono); letter-spacing: -.03em; }
