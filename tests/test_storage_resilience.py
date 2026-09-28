@@ -59,6 +59,22 @@ def _source_database(path: Path) -> None:
         connection.commit()
 
 
+def test_file_sqlite_serves_more_readers_than_the_default_queue_pool(tmp_path):
+    engine = make_engine(f"sqlite:///{tmp_path / 'radio.db'}")
+    create_schema(engine)
+    started = time.monotonic()
+    try:
+        connections = [engine.connect() for _ in range(16)]
+        try:
+            assert all(connection.exec_driver_sql("SELECT 1").scalar() == 1 for connection in connections)
+        finally:
+            for connection in connections:
+                connection.close()
+    finally:
+        engine.dispose()
+    assert time.monotonic() - started < 5
+
+
 def test_sqlite_connections_enable_durable_writes_and_bounded_lock_waits(tmp_path):
     engine = make_engine(f"sqlite:///{tmp_path / 'radio.db'}")
     try:

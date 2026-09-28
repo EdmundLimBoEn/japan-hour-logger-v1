@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from radio_logger.database.backup import sqlite_path_from_url
 from radio_logger.database.models import Base
@@ -21,6 +21,11 @@ def make_engine(url: str, *, echo: bool = False) -> Engine:
         connect_args["timeout"] = 5.0
         if sqlite_path_from_url(url) is None:
             engine_args["poolclass"] = StaticPool
+        else:
+            # QueuePool's default cap is 5 plus 10 overflow. The dashboard and
+            # ingest check out connections together, and the next checkout waits
+            # 30s, then drops the decode.
+            engine_args["poolclass"] = NullPool
     engine = create_engine(url, echo=echo, future=True, connect_args=connect_args, **engine_args)
     if url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
