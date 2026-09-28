@@ -87,23 +87,15 @@
             </table>
           </div>
         </article>
-      </div>
-      <article class="panel hamqsl-panel">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Global reference</p>
-            <h3>HamQSL</h3>
-            <p class="hint">One HamQSL HF summary. It is a global reference, not this station.</p>
+        <article class="panel hamqsl-panel">
+          <h3>HamQSL</h3>
+          <p class="hint">Global reference, not this station. <span id="hamqsl-updated"></span></p>
+          <div class="hamqsl-images">
+            <img id="img-bands" alt="HamQSL HF band summary" src="/api/propagation/image/bands">
           </div>
-          <p class="hint" id="hamqsl-updated"></p>
-        </div>
-        <div class="hamqsl-images">
-          <figure>
-            <img id="img-bands" alt="HamQSL HF band summary graphic" src="/api/propagation/image/bands">
-          </figure>
-        </div>
-        <p class="hint" id="hamqsl-bands"></p>
-      </article>
+          <p class="hint" id="hamqsl-bands"></p>
+        </article>
+      </div>
     </section>
 
     <section aria-labelledby="analysis-title" id="analysis">
