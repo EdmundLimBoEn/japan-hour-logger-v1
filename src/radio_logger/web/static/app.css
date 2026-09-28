@@ -62,7 +62,12 @@ button:hover, select:hover { filter: brightness(1.15); }
 #propagation { margin: 8px 0 28px; }
 #feed-detail { margin-top: 28px; }
 #feed-detail .prop-layout { margin-top: 12px; }
-#hamqsl-band-table { white-space: pre-line; margin-top: 10px; font: 12px/1.7 var(--mono); }
+#feed-detail .wx { display: block; margin-top: 4px; }
+#feed-detail .wx > div { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+#feed-detail .wx dt { margin: 0; font-size: 11px; }
+#feed-detail .wx dd { margin: 0; text-align: right; }
+.band-ref { margin-top: 8px; }
+.band-ref th:nth-child(n+2), .band-ref td:nth-child(n+2) { text-align: right; }
 .prop-layout { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 14px; align-items: start; }
 .wx { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 14px; }
 .solar-state { margin-top: 16px; font: 500 28px/1.3 var(--mono); color: var(--amber); letter-spacing: -.03em; }
