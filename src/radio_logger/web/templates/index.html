@@ -49,6 +49,72 @@
       </dl></details>
     </section>
 
+    <section id="propagation" aria-labelledby="prop-title">
+      <div class="analysis-toolbar">
+        <div>
+          <p class="eyebrow">From this receiver</p>
+          <h2 id="prop-title">Propagation</h2>
+        </div>
+      </div>
+      <p class="notice severe" id="prop-alert" role="alert" hidden></p>
+      <p class="notice" id="prop-error" role="status" hidden></p>
+      <div class="prop-layout">
+        <article class="panel">
+          <h3>Space weather</h3>
+          <p class="hint">NOAA SWPC. These indexes do not decide whether a band is open here.</p>
+          <dl class="wx" id="space-weather">
+            <div><dt>SFI</dt><dd id="wx-sfi">--</dd></div>
+            <div><dt>Kp</dt><dd id="wx-kp">--</dd></div>
+            <div><dt>Solar wind</dt><dd id="wx-wind">--</dd></div>
+            <div><dt>Bz</dt><dd id="wx-bz">--</dd></div>
+            <div><dt>X-ray</dt><dd id="wx-xray">--</dd></div>
+            <div><dt>Scales</dt><dd id="wx-scales">--</dd></div>
+          </dl>
+          <p class="hint" id="wx-updated"></p>
+        </article>
+        <article class="panel">
+          <h3>Sun at the receiver</h3>
+          <p class="solar-state" id="solar-state">--</p>
+          <p class="hint" id="solar-detail">Calculated from the receiver grid.</p>
+        </article>
+        <article class="panel band-panel">
+          <h3>Heard here</h3>
+          <p class="hint">Unique callsigns in the last 15 minutes, against the 15 minutes before. Quiet means this receiver heard nothing.</p>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Band</th><th>Here</th><th>Calls</th><th>SNR</th><th>Where</th></tr></thead>
+              <tbody id="band-rows"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+      <article class="panel hamqsl-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Global reference</p>
+            <h3>HamQSL</h3>
+            <p class="hint">Solar pictures and generalized band words from hamqsl.com. They are not this station's conditions.</p>
+          </div>
+          <p class="hint" id="hamqsl-updated"></p>
+        </div>
+        <div class="hamqsl-images">
+          <figure>
+            <img id="img-sun" alt="Solar disk from HamQSL" src="/api/propagation/image/sun">
+            <figcaption>Solar disk</figcaption>
+          </figure>
+          <figure>
+            <img id="img-muf" alt="Worldwide maximum usable frequency map from HamQSL" src="/api/propagation/image/muf">
+            <figcaption>MUF map</figcaption>
+          </figure>
+          <figure class="wide">
+            <img id="img-bands" alt="HamQSL HF band summary graphic" src="/api/propagation/image/bands">
+            <figcaption>HF summary</figcaption>
+          </figure>
+        </div>
+        <p class="hint" id="hamqsl-bands"></p>
+      </article>
+    </section>
+
     <section aria-labelledby="analysis-title" id="analysis">
       <div class="analysis-toolbar">
         <div><p class="eyebrow">Reception history</p><h2 id="analysis-title">The last 24 hours</h2></div>

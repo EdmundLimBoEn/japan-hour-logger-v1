@@ -251,8 +251,81 @@ async function refreshLatest() {
   body.replaceChildren(...rows);
 }
 
+function dash(value) { return value == null || value === "" ? "--" : String(value); }
+function scaleLabel(block, letter) {
+  if (!block || block.level == null) return letter + "?";
+  return letter + block.level;
+}
+function clockPhrase(iso, zone) {
+  return iso ? localTime(iso, zone) + " " + zoneLabel(zone) : "--";
+}
+function renderPropagation(data) {
+  const space = data.space_weather || {};
+  put("wx-sfi", dash(space.sfi));
+  put("wx-kp", space.kp == null ? "--" : n(space.kp, 2));
+  put("wx-wind", measure(space.solar_wind_kms, "km/s", 0));
+  put("wx-bz", space.bz_nt == null ? "--" : n(space.bz_nt, 1) + " nT");
+  put("wx-xray", dash(space.xray_class));
+  put("wx-scales", [scaleLabel(space.radio_blackout, "R"), scaleLabel(space.geomagnetic, "G"), scaleLabel(space.proton, "S")].join("  "));
+  const wxNote = space.stale ? "Showing the last NOAA update. A refresh failed." : (space.fetched_at ? "Updated " + localTime(space.fetched_at, "UTC") + " UTC" : "");
+  put("wx-updated", wxNote);
+  const solar = data.solar || {};
+  const state = solar.state === "day" ? "Day" : solar.state === "twilight" ? "Twilight" : solar.state === "night" ? "Night" : "--";
+  const until = solar.minutes_to_next == null ? "" : " · " + (solar.next_event === "sunset" ? "sunset" : "sunrise") + " in " + solar.minutes_to_next + " min";
+  put("solar-state", state + (solar.elevation_deg == null ? "" : "  " + n(solar.elevation_deg, 1) + "°") + until);
+  const where = data.location && data.location.label ? data.location.label : "the receiver";
+  put("solar-detail", "Sunrise " + clockPhrase(solar.sunrise_utc, "Asia/Singapore") + " · sunset " + clockPhrase(solar.sunset_utc, "Asia/Singapore") + " · " + where);
+  const alert = document.getElementById("prop-alert");
+  alert.hidden = !data.alert;
+  alert.textContent = data.alert ? data.alert.text : "";
+  const body = document.getElementById("band-rows");
+  const rows = (data.heard && data.heard.bands || []).map((band) => {
+    const row = document.createElement("tr");
+    const cells = [
+      band.band,
+      (band.condition || "quiet") + " " + (band.trend === "up" ? "↑" : band.trend === "down" ? "↓" : "→"),
+      count(band.unique_calls_15m),
+      band.median_snr == null ? "--" : n(band.median_snr, 0),
+      (band.regions || []).join(", ") || "--",
+    ];
+    cells.forEach((value, index) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      if (index === 1) cell.className = "cond-" + (band.condition || "quiet");
+      row.append(cell);
+    });
+    return row;
+  });
+  if (!rows.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    cell.textContent = "No recent HF decodes.";
+    row.append(cell);
+    rows.push(row);
+  }
+  body.replaceChildren(...rows);
+  const ham = data.hamqsl || {};
+  const groups = { day: [], night: [] };
+  (ham.bands || []).forEach((band) => {
+    const bucket = groups[band.time] || groups.day;
+    if (band.name && band.rating) bucket.push(band.name + " " + band.rating);
+  });
+  const lines = [];
+  if (groups.day.length) lines.push("Day " + groups.day.join(" · "));
+  if (groups.night.length) lines.push("Night " + groups.night.join(" · "));
+  if (ham.sunspots) lines.push("Sunspots " + ham.sunspots);
+  put("hamqsl-bands", lines.join("  ·  "));
+  put("hamqsl-updated", ham.updated ? "HamQSL " + ham.updated.trim() : (ham.error ? "HamQSL reference unavailable" : ""));
+  ["img-sun", "img-muf", "img-bands"].forEach((id) => {
+    const image = document.getElementById(id);
+    image.onerror = () => { image.hidden = true; };
+  });
+}
+
 let fastPending = false;
 let totalsPending = false;
+let propagationPending = false;
 async function tickFast() {
   tickClocks();
   if (fastPending) return;
@@ -318,11 +391,24 @@ function setupControls() {
   document.getElementById("chart-timezone").addEventListener("change", (event) => { selectedTimezone = event.target.value; tickSlow(true); });
 }
 
+async function refreshPropagation() {
+  if (propagationPending) return;
+  propagationPending = true;
+  try {
+    renderPropagation(await getJson("/api/propagation"));
+    showNotice("prop-error", "");
+  } catch (_err) {
+    showNotice("prop-error", "Propagation numbers could not refresh. Anything still on screen is from the last successful update.");
+  } finally { propagationPending = false; }
+}
+
 tickFast();
 tickTotals();
 tickSlow();
+refreshPropagation();
 setupControls();
 setInterval(tickClocks, 1000);
 setInterval(tickFast, 5000);
 setInterval(tickSlow, 30000);
 setInterval(tickTotals, 60000);
+setInterval(refreshPropagation, 60000);

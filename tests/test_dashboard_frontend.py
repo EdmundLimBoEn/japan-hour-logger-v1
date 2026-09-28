@@ -375,3 +375,42 @@ async function main() {
 }
 """
     )
+
+
+def test_propagation_panel_renders_station_bands_and_keeps_them_when_refresh_fails():
+    _run_dashboard(
+        r"""
+async function main() {
+  context.renderPropagation({
+    location: { label: 'OJ11' },
+    space_weather: { sfi: 167, kp: 2, solar_wind_kms: 421, bz_nt: -2.8, xray_class: 'B7.2',
+      radio_blackout: { level: 0, text: 'none' }, geomagnetic: { level: 0 }, proton: { level: 0 },
+      fetched_at: '2026-09-28T05:00:00Z' },
+    solar: { state: 'day', elevation_deg: 62.4, sunrise_utc: '2026-09-27T23:00:00Z',
+      sunset_utc: '2026-09-28T11:05:00Z', next_event: 'sunset', minutes_to_next: 343 },
+    alert: { text: 'Radio blackout R3 strong.' },
+    heard: { bands: [{ band: '15m', condition: 'excellent', trend: 'up', unique_calls_15m: 47,
+      median_snr: -11, regions: ['Japan', 'Oceania'] }] },
+    hamqsl: { updated: '28 Sep 2026 0527 GMT', sunspots: '67', bands: [
+      { name: '17m-15m', time: 'day', rating: 'Fair' },
+      { name: '80m-40m', time: 'night', rating: 'Good' },
+    ] },
+  });
+  assert.equal(element('wx-sfi').textContent, '167');
+  assert.equal(element('wx-wind').textContent, '421 km/s');
+  assert.equal(element('wx-scales').textContent, 'R0  G0  S0');
+  assert.match(element('solar-state').textContent, /Day/);
+  assert.match(element('solar-detail').textContent, /OJ11/);
+  assert.equal(element('prop-alert').hidden, false);
+  assert.match(element('prop-alert').textContent, /R3/);
+  assert.equal(element('band-rows').children[0].children[1].textContent, 'excellent ↑');
+  assert.equal(element('band-rows').children[0].children[1].className, 'cond-excellent');
+  assert.match(element('hamqsl-bands').textContent, /Day 17m-15m Fair/);
+  assert.match(element('hamqsl-bands').textContent, /Night 80m-40m Good/);
+  context.fetch = async () => { throw new Error('offline'); };
+  await context.refreshPropagation();
+  assert.equal(element('wx-sfi').textContent, '167');
+  assert.equal(element('prop-error').hidden, false);
+}
+"""
+    )

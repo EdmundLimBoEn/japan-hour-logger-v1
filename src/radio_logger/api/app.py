@@ -6,7 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfoNotFoundError
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, sessionmaker
@@ -29,6 +29,8 @@ from radio_logger.database.models import Observation
 from radio_logger.database.repository import Repository
 from radio_logger.export_csv import iter_observations_csv
 from radio_logger.models import RuntimeState
+from radio_logger.propagation.feeds import HAMQSL_IMAGES, PropagationFeeds
+from radio_logger.propagation.snapshot import build_snapshot
 from radio_logger.timeutil import as_utc, to_local
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -77,12 +79,15 @@ def create_app(
     config: AppConfig,
     session_factory: sessionmaker[Session],
     runtime: RuntimeState,
+    feeds: PropagationFeeds | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Japan Hour Logger", version=__version__)
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
     static_dir = WEB_DIR / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    propagation_feeds = feeds or PropagationFeeds()
 
     def db_session() -> Session:
         return session_factory()
@@ -342,6 +347,24 @@ def create_app(
             }
         finally:
             session.close()
+
+    @app.get("/api/propagation")
+    def api_propagation() -> dict[str, Any]:
+        session = db_session()
+        try:
+            return build_snapshot(session, config, propagation_feeds, datetime.now(tz=timezone.utc))
+        finally:
+            session.close()
+
+    @app.get("/api/propagation/image/{name}")
+    def api_propagation_image(name: str) -> Response:
+        if name not in HAMQSL_IMAGES:
+            raise HTTPException(status_code=404, detail="Unknown image")
+        image = propagation_feeds.image(name)
+        if image is None:
+            raise HTTPException(status_code=404, detail="Image unavailable")
+        body, media = image
+        return Response(content=body, media_type=media, headers={"Cache-Control": "public, max-age=300"})
 
     @app.get("/api/stats/totals")
     def api_totals() -> dict[str, Any]:
