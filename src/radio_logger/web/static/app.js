@@ -347,7 +347,6 @@ function renderPropagation(data) {
     ["Electrons", dash(ham.electron_flux)],
     ["Aurora", dash(ham.aurora)],
   ]);
-  renderBandTable("hamqsl-band-table", names, groups);
   const measured = (heard.bands || [])[0];
   fillPairs("heard-full", measured ? [
     ["Band", measured.band],
@@ -359,44 +358,6 @@ function renderPropagation(data) {
     ["Furthest", measured.max_distance_km == null ? "--" : count(measured.max_distance_km) + " km"],
     ["Where", (measured.regions || []).join(", ") || "--"],
   ] : [["Band", "--"]]);
-}
-
-function ratingClass(word) {
-  const key = String(word || "").toLowerCase();
-  if (key === "good" || key === "excellent") return "cond-good";
-  if (key === "fair") return "cond-fair";
-  if (key === "poor") return "cond-poor";
-  return "";
-}
-
-function renderBandTable(id, names, groups) {
-  const table = document.createElement("table");
-  table.className = "band-ref";
-  const head = document.createElement("tr");
-  ["Band", "Day", "Night"].forEach((label) => {
-    const cell = document.createElement("th");
-    cell.textContent = label;
-    head.append(cell);
-  });
-  const thead = document.createElement("thead");
-  thead.append(head);
-  const body = document.createElement("tbody");
-  names.forEach((name) => {
-    const row = document.createElement("tr");
-    const band = document.createElement("td");
-    band.textContent = name;
-    row.append(band);
-    ["day", "night"].forEach((when) => {
-      const cell = document.createElement("td");
-      const rating = groups[when][name] || "--";
-      cell.textContent = rating;
-      cell.className = ratingClass(rating);
-      row.append(cell);
-    });
-    body.append(row);
-  });
-  table.append(thead, body);
-  document.getElementById(id).replaceChildren(table);
 }
 
 function fillPairs(id, pairs) {
