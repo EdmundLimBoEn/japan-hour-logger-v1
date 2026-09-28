@@ -60,17 +60,15 @@ button:hover, select:hover { filter: brightness(1.15); }
 .window-summary strong { color: var(--text); font-family: var(--mono); font-size: 12px; font-weight: 500; }
 .window-summary .japan-text strong { color: var(--amber); }
 #propagation { margin: 8px 0 28px; }
-.prop-layout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 14px; align-items: start; }
-.wx { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 14px; }
+.prop-layout { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 14px; align-items: start; }
+.wx { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 14px; }
 .solar-state { margin-top: 16px; font: 500 28px/1.3 var(--mono); color: var(--amber); letter-spacing: -.03em; }
 .heard-condition { margin-top: 12px; font: 500 28px/1.2 var(--mono); letter-spacing: -.03em; }
 .cond-excellent, .cond-good { color: var(--teal); }
 .cond-fair { color: var(--amber); }
 .cond-poor, .cond-quiet { color: var(--muted); }
 .notice.severe { color: var(--red); background: #ff8a8a12; border-color: #ff8a8a66; }
-.hamqsl-strip { margin-top: 16px; }
-.hamqsl-ratings { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font: 12px/1.4 var(--mono); }
-.hamqsl-ratings p { margin: 0; }
+.hamqsl-tile img { width: 100%; max-width: 410px; height: auto; display: block; margin-top: 12px; border-radius: 4px; background: #071018; }
 .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
 .panel { min-width: 0; padding: 20px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .panel.full { grid-column: 1 / -1; }
@@ -96,7 +94,7 @@ tr.japan td { color: var(--amber); }
 tbody tr:hover { background: #e2edf505; }
 footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 10px; margin-top: 24px; }
 @media (min-width: 1450px) { .metric-value { font-size: 44px; } }
-@media (max-width: 1050px) { body { padding: 24px; } .metric { padding: 18px; } .analysis-toolbar { align-items: start; flex-direction: column; gap: 14px; } .prop-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 1050px) { body { padding: 24px; } .metric { padding: 18px; } .analysis-toolbar { align-items: start; flex-direction: column; gap: 14px; } .prop-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 680px) {
   body { padding: 20px 14px; }
   .topbar { align-items: start; flex-direction: column; gap: 15px; }

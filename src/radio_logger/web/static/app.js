@@ -316,7 +316,12 @@ function renderPropagation(data) {
     return name + (day ? " day " + day : "") + (night ? " night " + night : "");
   });
   if (ham.sunspots) ratings.push("Sunspots " + ham.sunspots);
-  document.getElementById("hamqsl-bands").textContent = ratings.join("   ");
+  const fallback = document.getElementById("hamqsl-bands");
+  fallback.textContent = ratings.join("   ");
+  const hamImage = document.getElementById("img-bands");
+  hamImage.hidden = false;
+  fallback.hidden = true;
+  hamImage.onerror = () => { hamImage.hidden = true; fallback.hidden = false; };
   put("hamqsl-updated", ham.updated ? ham.updated.trim() : (ham.error ? "Unavailable" : ""));
 }
 

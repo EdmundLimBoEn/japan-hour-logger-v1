@@ -83,15 +83,13 @@
           <p class="hint" id="heard-hint">This receiver listens on one frequency.</p>
           <p class="hint" id="heard-detail"></p>
         </article>
-      </div>
-      <article class="panel hamqsl-strip">
-        <div class="panel-heading">
+        <article class="panel hamqsl-tile">
           <h3>HamQSL</h3>
-          <p class="hint" id="hamqsl-updated"></p>
-        </div>
-        <p class="hint">Global reference, not this station.</p>
-        <div id="hamqsl-bands" class="hamqsl-ratings"></div>
-      </article>
+          <p class="hint">Global reference. <span id="hamqsl-updated"></span></p>
+          <img id="img-bands" alt="HamQSL HF band summary" src="/api/propagation/image/bands">
+          <p class="hint" id="hamqsl-bands" hidden></p>
+        </article>
+      </div>
     </section>
 
     <section aria-labelledby="analysis-title" id="analysis">
