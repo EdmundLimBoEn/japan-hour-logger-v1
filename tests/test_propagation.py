@@ -98,6 +98,7 @@ def test_propagation_api_uses_cached_feeds_and_local_decodes(ingestor, session_f
             skip_dedupe=True,
         )
     ingestor.ingest_raw(_raw(now - timedelta(minutes=20), "CQ JA1OLD PM95", 21_074_000), skip_dedupe=True)
+    ingestor.ingest_raw(_raw(now - timedelta(hours=2), "CQ VK2OLD QF56", 14_074_000), skip_dedupe=True)
 
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
@@ -127,7 +128,10 @@ def test_propagation_api_uses_cached_feeds_and_local_decodes(ingestor, session_f
     assert body["alert"] is None
     assert body["hamqsl"]["sunspots"] == "67"
     assert body["location"]["label"] == "OJ11"
-    band = next(item for item in body["heard"]["bands"] if item["band"] == "15m")
+    assert body["heard"]["band"] == "15m"
+    assert body["heard"]["dial_hz"] == 21_074_000
+    assert [item["band"] for item in body["heard"]["bands"]] == ["15m"]
+    band = body["heard"]["bands"][0]
     assert band["unique_calls_15m"] == 4
     assert band["condition"] == "fair"
     assert band["trend"] == "up"

@@ -278,8 +278,14 @@ function renderPropagation(data) {
   const alert = document.getElementById("prop-alert");
   alert.hidden = !data.alert;
   alert.textContent = data.alert ? data.alert.text : "";
+  const heard = data.heard || {};
+  const tuned = heard.band || (heard.bands && heard.bands[0] && heard.bands[0].band);
+  const dial = heard.dial_hz == null ? "" : (heard.dial_hz / 1e6).toFixed(3) + " MHz";
+  put("heard-hint", tuned
+    ? "One frequency: " + tuned + (dial ? " · " + dial : "") + ". Last 15 minutes against the 15 before."
+    : "This receiver listens on one frequency. No decodes yet.");
   const body = document.getElementById("band-rows");
-  const rows = (data.heard && data.heard.bands || []).map((band) => {
+  const rows = (heard.bands || []).map((band) => {
     const row = document.createElement("tr");
     const cells = [
       band.band,

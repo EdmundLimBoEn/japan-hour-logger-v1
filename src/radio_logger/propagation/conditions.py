@@ -116,29 +116,44 @@ def _band_stats(rows: list[Any]) -> dict[str, dict[str, Any]]:
     return stats
 
 
+def _tuned_band(session: Session) -> tuple[str | None, int | None]:
+    row = session.execute(
+        select(Observation.band, Observation.dial_frequency_hz)
+        .where(Observation.band.is_not(None))
+        .order_by(Observation.timestamp_utc.desc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None, None
+    return row[0], row[1]
+
+
 def heard_here(session: Session, now: datetime) -> dict[str, Any]:
     current_since = now - timedelta(minutes=15)
     previous_since = now - timedelta(minutes=30)
     current = _band_stats(_window_rows(session, current_since, now))
     previous = _band_stats(_window_rows(session, previous_since, current_since))
+    tuned, dial_hz = _tuned_band(session)
     bands = []
-    for band in HF_BANDS:
-        unique = current[band]["unique"]
+    if tuned in current:
+        unique = current[tuned]["unique"]
         bands.append(
             {
-                "band": band,
+                "band": tuned,
                 "condition": condition_for_count(unique),
-                "trend": trend_for_counts(unique, previous[band]["unique"]),
+                "trend": trend_for_counts(unique, previous[tuned]["unique"]),
                 "confidence": confidence_for_count(unique),
                 "unique_calls_15m": unique,
-                "unique_calls_previous_15m": previous[band]["unique"],
-                "median_snr": current[band]["median_snr"],
-                "max_distance_km": current[band]["max_distance_km"],
-                "regions": current[band]["regions"],
+                "unique_calls_previous_15m": previous[tuned]["unique"],
+                "median_snr": current[tuned]["median_snr"],
+                "max_distance_km": current[tuned]["max_distance_km"],
+                "regions": current[tuned]["regions"],
             }
         )
     return {
         "window_minutes": 15,
-        "basis": "Unique callsigns decoded at this receiver. Quiet means nothing was heard, not that the band is closed.",
+        "band": tuned,
+        "dial_hz": dial_hz,
+        "basis": "This receiver listens on one frequency. Quiet means that frequency heard nothing.",
         "bands": bands,
     }
