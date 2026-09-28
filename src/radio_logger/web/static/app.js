@@ -323,6 +323,60 @@ function renderPropagation(data) {
   fallback.hidden = true;
   hamImage.onerror = () => { hamImage.hidden = true; fallback.hidden = false; };
   put("hamqsl-updated", ham.updated ? ham.updated.trim() : (ham.error ? "Unavailable" : ""));
+  fillPairs("noaa-detail", [
+    ["SFI", dash(space.sfi)],
+    ["Kp", space.kp == null ? "--" : n(space.kp, 2)],
+    ["Ap", dash(space.ap)],
+    ["Wind", space.solar_wind_kms == null ? "--" : n(space.solar_wind_kms, 0) + " km/s"],
+    ["Bz", space.bz_nt == null ? "--" : n(space.bz_nt, 1) + " nT"],
+    ["Bt", space.bt_nt == null ? "--" : n(space.bt_nt, 1) + " nT"],
+    ["X-ray", dash(space.xray_class)],
+    ["R", scaleLabel(space.radio_blackout, "R")],
+    ["S", scaleLabel(space.proton, "S")],
+    ["G", scaleLabel(space.geomagnetic, "G")],
+  ]);
+  fillPairs("hamqsl-index", [
+    ["SFI", dash(ham.solar_flux)],
+    ["A", dash(ham.a_index)],
+    ["K", dash(ham.k_index)],
+    ["X-ray", dash(ham.xray)],
+    ["Sunspots", dash(ham.sunspots)],
+    ["Wind", dash(ham.solar_wind)],
+    ["Mag", dash(ham.magnetic_field)],
+    ["Protons", dash(ham.proton_flux)],
+    ["Electrons", dash(ham.electron_flux)],
+    ["Aurora", dash(ham.aurora)],
+  ]);
+  const bandLines = names.map((name) => {
+    const day = groups.day[name];
+    const night = groups.night[name];
+    return name + "  " + (day || "--") + " day  " + (night || "--") + " night";
+  });
+  document.getElementById("hamqsl-band-table").textContent = bandLines.join("\n");
+  const measured = (heard.bands || [])[0];
+  fillPairs("heard-full", measured ? [
+    ["Band", measured.band],
+    ["Calls", count(measured.unique_calls_15m)],
+    ["Previous", count(measured.unique_calls_previous_15m)],
+    ["Decodes", count(measured.decodes_15m)],
+    ["SNR", measured.median_snr == null ? "--" : n(measured.median_snr, 0) + " dB"],
+    ["SNR range", measured.min_snr == null ? "--" : n(measured.min_snr, 0) + " to " + n(measured.max_snr, 0)],
+    ["Furthest", measured.max_distance_km == null ? "--" : count(measured.max_distance_km) + " km"],
+    ["Where", (measured.regions || []).join(", ") || "--"],
+  ] : [["Band", "--"]]);
+}
+
+function fillPairs(id, pairs) {
+  const list = document.getElementById(id);
+  list.replaceChildren(...pairs.map(([label, value]) => {
+    const row = document.createElement("div");
+    const term = document.createElement("dt");
+    const data = document.createElement("dd");
+    term.textContent = label;
+    data.textContent = value;
+    row.append(term, data);
+    return row;
+  }));
 }
 
 let fastPending = false;

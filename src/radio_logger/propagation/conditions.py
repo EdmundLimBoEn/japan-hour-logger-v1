@@ -88,11 +88,15 @@ def _window_rows(session: Session, since: datetime, until: datetime) -> list[Any
 
 def _band_stats(rows: list[Any]) -> dict[str, dict[str, Any]]:
     calls: dict[str, set[str]] = defaultdict(set)
+    decodes: dict[str, int] = defaultdict(int)
     snrs: dict[str, list[float]] = defaultdict(list)
     distances: dict[str, list[float]] = defaultdict(list)
     regions: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     for band, callsign, snr, distance, continent, is_japan in rows:
-        if band not in HF_BANDS or not callsign:
+        if band not in HF_BANDS:
+            continue
+        decodes[band] += 1
+        if not callsign:
             continue
         calls[band].add(callsign)
         if snr is not None:
@@ -109,7 +113,10 @@ def _band_stats(rows: list[Any]) -> dict[str, dict[str, Any]]:
         ranked = sorted(region_counts, key=lambda key: (-region_counts[key], key))
         stats[band] = {
             "unique": len(calls[band]),
+            "decodes": decodes[band],
             "median_snr": round(statistics.median(snrs[band]), 1) if snrs[band] else None,
+            "min_snr": round(min(snrs[band]), 1) if snrs[band] else None,
+            "max_snr": round(max(snrs[band]), 1) if snrs[band] else None,
             "max_distance_km": round(max(distances[band])) if distances[band] else None,
             "regions": [labels[key] for key in ranked[:3]],
         }
@@ -145,7 +152,10 @@ def heard_here(session: Session, now: datetime) -> dict[str, Any]:
                 "confidence": confidence_for_count(unique),
                 "unique_calls_15m": unique,
                 "unique_calls_previous_15m": previous[tuned]["unique"],
+                "decodes_15m": current[tuned]["decodes"],
                 "median_snr": current[tuned]["median_snr"],
+                "min_snr": current[tuned]["min_snr"],
+                "max_snr": current[tuned]["max_snr"],
                 "max_distance_km": current[tuned]["max_distance_km"],
                 "regions": current[tuned]["regions"],
             }

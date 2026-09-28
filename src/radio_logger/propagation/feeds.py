@@ -117,6 +117,10 @@ def parse_hamqsl(xml_text: str) -> dict[str, Any]:
         "sunspots": text("sunspots"),
         "solar_wind": text("solarwind"),
         "magnetic_field": text("magneticfield"),
+        "proton_flux": text("protonflux"),
+        "electron_flux": text("electonflux"),
+        "aurora": text("aurora"),
+        "helium": text("heliumline"),
         "bands": bands,
         "source": "HamQSL",
     }

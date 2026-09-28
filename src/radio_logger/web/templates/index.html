@@ -136,6 +136,18 @@
         <table><thead><tr><th>SGT</th><th>UTC</th><th>SNR dB</th><th>DF Hz</th><th>Callsign</th><th>Grid</th><th>Country</th><th>km</th><th>Message</th></tr></thead><tbody id="latest"></tbody></table>
       </div>
     </section>
+
+    <section id="feed-detail" aria-labelledby="feed-title">
+      <p class="eyebrow">Same feeds, rest of the numbers</p>
+      <h2 id="feed-title">NOAA and HamQSL</h2>
+      <p class="hint">Ionosonde maps, PSK Reporter, and path models are not connected. These are the readings this logger actually fetches.</p>
+      <div class="prop-layout">
+        <article class="panel"><h3>NOAA SWPC</h3><dl class="wx" id="noaa-detail"></dl></article>
+        <article class="panel"><h3>HamQSL indexes</h3><dl class="wx" id="hamqsl-index"></dl></article>
+        <article class="panel"><h3>HamQSL bands</h3><div class="hamqsl-ratings" id="hamqsl-band-table"></div></article>
+        <article class="panel"><h3>This frequency</h3><dl class="wx" id="heard-full"></dl></article>
+      </div>
+    </section>
   </main>
   <footer>Receive-only FT8 · Japan is highlighted in amber <span>Japan Hour Logger v{{ version }}</span></footer>
   <script>
