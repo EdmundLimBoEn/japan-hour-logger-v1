@@ -107,11 +107,18 @@ def test_database_size_includes_wal_and_shared_memory(tmp_path):
     engine = make_engine(f"sqlite:///{path}")
     create_schema(engine)
     try:
-        files = (path, Path(f"{path}-wal"), Path(f"{path}-shm"))
-        expected = sum(file.stat().st_size for file in files)
-        assert expected > path.stat().st_size
-        assert database_size_bytes(f"sqlite:///{path}") == expected
-        assert database_size_bytes(f"sqlite+pysqlite:///{path}?timeout=2") == expected
+        # NullPool closes the SQLite handle after each checkout. The last close
+        # checkpoints WAL and deletes the sidecar files, so measure while open.
+        with engine.connect() as connection:
+            connection.exec_driver_sql("CREATE TABLE wal_size_probe (x INTEGER)")
+            wal = Path(f"{path}-wal")
+            shm = Path(f"{path}-shm")
+            assert wal.stat().st_size > 0
+            assert shm.stat().st_size > 0
+            expected = path.stat().st_size + wal.stat().st_size + shm.stat().st_size
+            assert expected > path.stat().st_size
+            assert database_size_bytes(f"sqlite:///{path}") == expected
+            assert database_size_bytes(f"sqlite+pysqlite:///{path}?timeout=2") == expected
     finally:
         engine.dispose()
 
@@ -308,17 +315,18 @@ def test_disk_full_rollback_preserves_existing_data_and_allows_recovery(tmp_path
     try:
         with session_scope(factory) as session:
             Repository(session).insert_observation(_decode())
-        with engine.connect() as connection:
-            count = connection.exec_driver_sql("PRAGMA page_count").scalar()
-            connection.exec_driver_sql(f"PRAGMA max_page_count={count}")
         with pytest.raises(OperationalError, match="full"):
             with session_scope(factory) as session:
+                # max_page_count is per connection. NullPool does not reuse
+                # handles, so the cap has to be set on the writer itself.
+                connection = session.connection()
+                count = connection.exec_driver_sql("PRAGMA page_count").scalar()
+                connection.exec_driver_sql(f"PRAGMA max_page_count={count}")
                 Repository(session).insert_observation(_decode("X" * 100_000))
         with session_scope(factory) as session:
             assert session.scalar(select(func.count()).select_from(Observation)) == 1
             assert session.get(Station, "JA1XYZ").decode_count == 1
         with engine.connect() as connection:
-            connection.exec_driver_sql("PRAGMA max_page_count=100000")
             assert connection.exec_driver_sql("PRAGMA integrity_check").scalar() == "ok"
         with session_scope(factory) as session:
             Repository(session).insert_observation(_decode("CQ JA1XYZ PM96"))
